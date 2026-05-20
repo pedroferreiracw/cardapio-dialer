@@ -1,4 +1,4 @@
- const pool = require('../config/database');
+const pool = require('../config/database');
 const { generateFullCadence } = require('../services/scheduleService');
 
 async function receiveLead(req, res) {
@@ -14,7 +14,6 @@ async function receiveLead(req, res) {
     prospection_id
   } = req.body;
 
-  // Validação básica
   if (!lead_id || !lead_phone || !sdr_id) {
     return res.status(400).json({ 
       error: 'Campos obrigatórios: lead_id, lead_phone, sdr_id' 
@@ -22,7 +21,6 @@ async function receiveLead(req, res) {
   }
 
   try {
-    // Verifica se o lead já está na fila (evita duplicatas)
     const existing = await pool.query(
       `SELECT id FROM leads_queue 
        WHERE lead_id = $1 AND status NOT IN ('WON', 'LOST', 'ARCHIVED')`,
@@ -36,13 +34,11 @@ async function receiveLead(req, res) {
       });
     }
 
-    // Garante que o SDR existe na tabela
     await pool.query(`
       INSERT INTO sdrs (id, name) VALUES ($1, $2)
       ON CONFLICT (id) DO UPDATE SET name = $2
     `, [sdr_id, sdr_name]);
 
-    // Insere o lead na fila
     const result = await pool.query(`
       INSERT INTO leads_queue 
         (lead_id, lead_name, lead_phone, lead_email, lead_company,
@@ -53,8 +49,6 @@ async function receiveLead(req, res) {
         sdr_id, sdr_name, cadence, prospection_id]);
 
     const leadQueueId = result.rows[0].id;
-
-    // Gera os horários de tentativa para os 7 dias
     await generateFullCadence(leadQueueId);
 
     return res.status(201).json({
@@ -100,22 +94,20 @@ async function updateLeadStatus(req, res) {
   const { lead_id } = req.params;
   const { status } = req.body;
 
-  const validStatuses = ['WON', 'LOST'];
+  const validStatuses = ['WON', 'LOST', 'SCHEDULED', 'WRONG_NUMBER'];
   if (!validStatuses.includes(status)) {
     return res.status(400).json({ 
-      error: 'Status inválido. Use WON ou LOST' 
+      error: 'Status inválido. Use WON, LOST, SCHEDULED ou WRONG_NUMBER' 
     });
   }
 
   try {
-    // Atualiza o status do lead
     await pool.query(`
       UPDATE leads_queue 
       SET status = $1, updated_at = NOW()
       WHERE lead_id = $2 AND status NOT IN ('WON', 'LOST', 'ARCHIVED')
     `, [status, lead_id]);
 
-    // Cancela todos os agendamentos futuros
     await pool.query(`
       UPDATE daily_schedules ds
       SET status = 'SKIPPED'
@@ -136,4 +128,53 @@ async function updateLeadStatus(req, res) {
   }
 }
 
-module.exports = { receiveLead, getLeadStatus, updateLeadStatus };
+// Força discagem imediata — apenas para testes
+async function forceCall(req, res) {
+  const { lead_id } = req.params;
+
+  try {
+    // Busca o lead na fila
+    const result = await pool.query(`
+      SELECT id FROM leads_queue
+      WHERE lead_id = $1 AND status NOT IN ('WON', 'LOST', 'ARCHIVED')
+      LIMIT 1
+    `, [lead_id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Lead não encontrado na fila' });
+    }
+
+    const leadQueueId = result.rows[0].id;
+
+    // Atualiza o próximo agendamento pendente para agora
+    await pool.query(`
+      UPDATE daily_schedules
+      SET scheduled_at = NOW() - INTERVAL '1 minute'
+      WHERE id = (
+        SELECT id FROM daily_schedules
+        WHERE lead_queue_id = $1
+          AND status = 'PENDING'
+        ORDER BY scheduled_at ASC
+        LIMIT 1
+      )
+    `, [leadQueueId]);
+
+    // Garante que o lead está como PENDING
+    await pool.query(`
+      UPDATE leads_queue
+      SET status = 'PENDING', updated_at = NOW()
+      WHERE id = $1
+    `, [leadQueueId]);
+
+    return res.json({
+      message: 'Discagem forçada — o scheduler vai ligar em até 1 minuto',
+      lead_queue_id: leadQueueId
+    });
+
+  } catch (err) {
+    console.error('Erro ao forçar discagem:', err);
+    return res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+}
+
+module.exports = { receiveLead, getLeadStatus, updateLeadStatus, forceCall };
