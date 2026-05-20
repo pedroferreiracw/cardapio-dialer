@@ -7,6 +7,7 @@ const { getRedisClient } = require('./config/redis');
 const leadsRoutes = require('./routes/leads');
 const sdrsRoutes = require('./routes/sdrs');
 const twilioRoutes = require('./routes/twilio');
+const tokenRoutes = require('./routes/token');
 const { startDialerJob } = require('./jobs/dialerJob');
 
 const app = express();
@@ -21,6 +22,7 @@ app.use(express.urlencoded({ extended: false }));
 app.use('/leads', leadsRoutes);
 app.use('/sdrs', sdrsRoutes);
 app.use('/twilio', twilioRoutes);
+app.use('/token', tokenRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

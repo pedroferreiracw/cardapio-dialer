@@ -40,7 +40,6 @@ function generateOutboundTwiML() {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
 
-  // Toca uma mensagem enquanto aguarda confirmação do AMD
   response.pause({ length: 1 });
   response.say({
     language: 'pt-BR',
@@ -51,20 +50,22 @@ function generateOutboundTwiML() {
   return response.toString();
 }
 
-// Gera TwiML para transferir a chamada para o SDR
-function generateTransferTwiML(sdrPhone) {
+// Gera TwiML para transferir a chamada para o SDR via WebRTC
+function generateTransferTwiML(sdrIdentity) {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
 
   response.say({
     language: 'pt-BR',
     voice: 'Polly.Camila'
-  }, 'Transferindo para nosso consultor.');
+  }, 'Conectando com nosso consultor.');
 
-  response.dial({
+  const dial = response.dial({
     timeout: 30,
     action: `${BACKEND_URL}/twilio/dial-complete`,
-  }, sdrPhone);
+  });
+
+  dial.client(sdrIdentity);
 
   return response.toString();
 }

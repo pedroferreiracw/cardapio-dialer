@@ -5,7 +5,6 @@ const {
   generateTransferTwiML,
   generateNoSdrTwiML,
   generateVoicemailTwiML,
-  getSdrPhone
 } = require('../services/twilioService');
 
 // Retorna TwiML inicial quando o lead atende
@@ -27,41 +26,29 @@ async function amdCallback(req, res) {
     const redis = await getRedisClient();
 
     if (AnsweredBy === 'human') {
-      // Humano atendeu — verifica se SDR está online
       const sdrStatus = await redis.get(`sdr:${sdrId}:status`);
 
       if (sdrStatus === 'ONLINE') {
-        // Busca número do SDR
-        const sdrPhone = await getSdrPhone(sdrId);
+        // Transfere para o SDR via WebRTC
+        const sdrIdentity = `sdr_${sdrId}`;
 
-        if (sdrPhone) {
-          // Transfere para o SDR
-          await redis.setEx(`sdr:${sdrId}:status`, 43200, 'BUSY');
-          await redis.setEx(`sdr:${sdrId}:current_call`, 43200, JSON.stringify({
-            leadQueueId,
-            callSid: CallSid,
-            startedAt: new Date().toISOString()
-          }));
+        await redis.setEx(`sdr:${sdrId}:status`, 43200, 'BUSY');
+        await redis.setEx(`sdr:${sdrId}:current_call`, 43200, JSON.stringify({
+          leadQueueId,
+          callSid: CallSid,
+          startedAt: new Date().toISOString()
+        }));
 
-          // Atualiza banco
-          await pool.query(`
-            UPDATE leads_queue
-            SET status = 'ANSWERED', answered_at = NOW(), updated_at = NOW()
-            WHERE id = $1
-          `, [leadQueueId]);
+        await pool.query(`
+          UPDATE leads_queue
+          SET status = 'ANSWERED', answered_at = NOW(), updated_at = NOW()
+          WHERE id = $1
+        `, [leadQueueId]);
 
-          // Redireciona chamada para transferir
-          const { client } = require('../services/twilioService');
-          await client.calls(CallSid).update({
-            twiml: generateTransferTwiML(sdrPhone)
-          });
-
-        } else {
-          // SDR não tem número cadastrado
-          await client.calls(CallSid).update({
-            twiml: generateNoSdrTwiML()
-          });
-        }
+        const { client } = require('../services/twilioService');
+        await client.calls(CallSid).update({
+          twiml: generateTransferTwiML(sdrIdentity)
+        });
 
       } else {
         // SDR offline — encerra com mensagem
@@ -121,7 +108,6 @@ async function statusCallback(req, res) {
         WHERE twilio_call_sid = $2
       `, [parseInt(CallDuration), CallSid]);
 
-      // SDR volta para ONLINE após chamada completada
       const redis = await getRedisClient();
       const sdrStatus = await redis.get(`sdr:${sdrId}:status`);
       if (sdrStatus === 'BUSY') {
