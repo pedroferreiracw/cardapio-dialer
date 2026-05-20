@@ -49,4 +49,38 @@ router.get('/:lead_id/force-now', async (req, res) => {
   }
 });
 
+// Rota temporária — força lead para o topo da fila
+router.get('/:lead_id/force-top', async (req, res) => {
+  const { lead_id } = req.params;
+  const pool = require('../config/database');
+
+  try {
+    const result = await pool.query(`
+      UPDATE daily_schedules
+      SET scheduled_at = '2020-01-01 00:00:00'
+      WHERE id = (
+        SELECT ds.id FROM daily_schedules ds
+        JOIN leads_queue lq ON lq.id = ds.lead_queue_id
+        WHERE lq.lead_id = $1
+          AND ds.status = 'PENDING'
+        ORDER BY ds.scheduled_at ASC
+        LIMIT 1
+      )
+      RETURNING id, scheduled_at
+    `, [lead_id]);
+
+    await pool.query(`
+      UPDATE leads_queue SET status = 'PENDING', updated_at = NOW()
+      WHERE lead_id = $1
+    `, [lead_id]);
+
+    res.json({ 
+      message: 'Lead movido para o topo da fila',
+      updated: result.rows[0]
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
