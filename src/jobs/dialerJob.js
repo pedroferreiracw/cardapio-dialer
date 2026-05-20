@@ -48,6 +48,7 @@ async function getLeadsDueNow() {
     LIMIT 50
   `);
 
+  console.log(`[DIALER] Query retornou ${result.rows.length} leads. IDs dos SDRs: ${[...new Set(result.rows.map(r => r.sdr_id))].join(', ')}`);
   return result.rows;
 }
 
@@ -55,8 +56,10 @@ async function isSdrOnline(sdrId) {
   try {
     const redis = await getRedisClient();
     const status = await redis.get(`sdr:${sdrId}:status`);
+    console.log(`[SDR CHECK] sdr_id=${sdrId} status_no_redis=${status}`);
     return status === 'ONLINE';
   } catch (err) {
+    console.error(`[SDR CHECK] Erro ao verificar SDR ${sdrId}:`, err.message);
     return false;
   }
 }
@@ -106,6 +109,7 @@ async function processLead(lead) {
 
   } catch (err) {
     console.error(`[DIALER] Erro ao discar para ${lead.lead_name}:`, err.message);
+    console.error(`[DIALER] Stack:`, err.stack);
   }
 }
 
@@ -116,6 +120,7 @@ async function startDialerJob() {
     try {
       const businessHours = await isBusinessHours();
       const forceTest = process.env.FORCE_TEST === 'true';
+      console.log(`[DIALER] businessHours=${businessHours} forceTest=${forceTest}`);
       if (!businessHours && !forceTest) return;
 
       const leads = await getLeadsDueNow();
