@@ -57,6 +57,13 @@ async function isSdrOnline(sdrId) {
     const redis = await getRedisClient();
     const status = await redis.get(`sdr:${sdrId}:status`);
     console.log(`[SDR CHECK] sdr_id=${sdrId} status_no_redis=${status}`);
+
+    // Se Redis não tem o status, verifica variável de ambiente de teste
+    if (!status && process.env.FORCE_SDR_ONLINE === sdrId) {
+      console.log(`[SDR CHECK] sdr_id=${sdrId} forçado ONLINE via FORCE_SDR_ONLINE`);
+      return true;
+    }
+
     return status === 'ONLINE';
   } catch (err) {
     console.error(`[SDR CHECK] Erro ao verificar SDR ${sdrId}:`, err.message);
