@@ -16,10 +16,8 @@ router.get('/:lead_id', getLeadStatus);
 // Atualiza status (WON ou LOST)
 router.patch('/:lead_id/status', updateLeadStatus);
 
-// Força discagem imediata (apenas para testes)
+// Força discagem imediata via POST (apenas para testes)
 router.post('/:lead_id/force-call', forceCall);
-
-module.exports = router;
 
 // Rota temporária para forçar discagem via GET
 router.get('/:lead_id/force-now', async (req, res) => {
@@ -50,3 +48,5 @@ router.get('/:lead_id/force-now', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+module.exports = router;
