@@ -10,7 +10,6 @@ const client = twilio(
 const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
 const BACKEND_URL = process.env.BACKEND_URL;
 
-// Inicia uma ligação para o lead
 async function initiateCall(leadQueueId, leadPhone, sdrId, leadName) {
   try {
     const call = await client.calls.create({
@@ -37,34 +36,24 @@ async function initiateCall(leadQueueId, leadPhone, sdrId, leadName) {
   }
 }
 
-// Gera TwiML para quando o lead atender (antes do AMD confirmar)
 function generateOutboundTwiML() {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
 
   response.pause({ length: 2 });
-  response.say({
-    language: 'pt-BR',
-    voice: 'Polly.Camila'
-  }, 'Olá, aguarde um momento por favor.');
+  response.say('Ola, aguarde um momento por favor.');
   response.pause({ length: 5 });
-  response.say({
-    language: 'pt-BR',
-    voice: 'Polly.Camila'
-  }, 'Obrigado pela sua paciência.');
+  response.say('Obrigado pela sua paciencia.');
   response.pause({ length: 5 });
 
   return response.toString();
 }
-// Gera TwiML para transferir a chamada para o SDR via WebRTC
+
 function generateTransferTwiML(sdrIdentity) {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
 
-  response.say({
-    language: 'pt-BR',
-    voice: 'Polly.Camila'
-  }, 'Conectando com nosso consultor.');
+  response.say('Conectando com nosso consultor.');
 
   const dial = response.dial({
     timeout: 30,
@@ -76,21 +65,15 @@ function generateTransferTwiML(sdrIdentity) {
   return response.toString();
 }
 
-// Gera TwiML para quando SDR não atender a transferência
 function generateNoSdrTwiML() {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
 
-  response.say({
-    language: 'pt-BR',
-    voice: 'Polly.Camila'
-  }, 'Nossos consultores estão ocupados no momento. Entraremos em contato em breve. Obrigado.');
-
+  response.say('Nossos consultores estao ocupados no momento. Entraremos em contato em breve. Obrigado.');
   response.hangup();
   return response.toString();
 }
 
-// Gera TwiML para caixa postal detectada
 function generateVoicemailTwiML() {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
@@ -98,7 +81,6 @@ function generateVoicemailTwiML() {
   return response.toString();
 }
 
-// Busca o número do SDR no banco
 async function getSdrPhone(sdrId) {
   const result = await pool.query(
     'SELECT phone FROM sdrs WHERE id = $1',
