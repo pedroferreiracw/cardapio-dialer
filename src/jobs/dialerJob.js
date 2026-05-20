@@ -115,7 +115,8 @@ async function startDialerJob() {
   cron.schedule('* * * * *', async () => {
     try {
       const businessHours = await isBusinessHours();
-      if (!businessHours) return;
+      const forceTest = process.env.FORCE_TEST === 'true';
+      if (!businessHours && !forceTest) return;
 
       const leads = await getLeadsDueNow();
       if (leads.length === 0) return;
