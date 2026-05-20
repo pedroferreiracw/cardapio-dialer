@@ -12,10 +12,18 @@ const BACKEND_URL = process.env.BACKEND_URL;
 
 async function initiateCall(leadQueueId, leadPhone, sdrId, leadName) {
   try {
+    const VoiceResponse = twilio.twiml.VoiceResponse;
+    const response = new VoiceResponse();
+    response.pause({ length: 2 });
+    response.say('Ola, aguarde um momento por favor.');
+    response.pause({ length: 5 });
+    response.say('Obrigado pela sua paciencia.');
+    response.pause({ length: 5 });
+
     const call = await client.calls.create({
       to: leadPhone,
       from: TWILIO_PHONE_NUMBER,
-      url: `${BACKEND_URL}/twilio/twiml/outbound?leadQueueId=${leadQueueId}&sdrId=${sdrId}`,
+      twiml: response.toString(),
       statusCallback: `${BACKEND_URL}/twilio/status?leadQueueId=${leadQueueId}&sdrId=${sdrId}`,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
       statusCallbackMethod: 'POST',
@@ -26,6 +34,15 @@ async function initiateCall(leadQueueId, leadPhone, sdrId, leadName) {
       asyncAmdStatusCallbackMethod: 'POST',
       timeout: 40,
     });
+
+    console.log(`[TWILIO] Ligação iniciada → ${leadPhone} | SID: ${call.sid}`);
+    return call.sid;
+
+  } catch (err) {
+    console.error(`[TWILIO] Erro ao iniciar ligação:`, err.message);
+    throw err;
+  }
+}
 
     console.log(`[TWILIO] Ligação iniciada → ${leadPhone} | SID: ${call.sid}`);
     return call.sid;
