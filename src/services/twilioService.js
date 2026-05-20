@@ -20,10 +20,12 @@ async function initiateCall(leadQueueId, leadPhone, sdrId, leadName) {
       statusCallback: `${BACKEND_URL}/twilio/status?leadQueueId=${leadQueueId}&sdrId=${sdrId}`,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
       statusCallbackMethod: 'POST',
-      machineDetection: 'DetectMessageEnd',
+      machineDetection: 'Enable',
       asyncAmd: 'true',
       asyncAmdStatusCallback: `${BACKEND_URL}/twilio/amd?leadQueueId=${leadQueueId}&sdrId=${sdrId}`,
-      timeout: 30,
+      machineDetectionTimeout: 10,
+      asyncAmdStatusCallbackMethod: 'POST',
+      timeout: 40,
     });
 
     console.log(`[TWILIO] Ligação iniciada → ${leadPhone} | SID: ${call.sid}`);
@@ -40,16 +42,20 @@ function generateOutboundTwiML() {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
 
-  response.pause({ length: 1 });
+  response.pause({ length: 2 });
   response.say({
     language: 'pt-BR',
     voice: 'Polly.Camila'
-  }, 'Por favor, aguarde um momento.');
-  response.pause({ length: 2 });
+  }, 'Olá, aguarde um momento por favor.');
+  response.pause({ length: 5 });
+  response.say({
+    language: 'pt-BR',
+    voice: 'Polly.Camila'
+  }, 'Obrigado pela sua paciência.');
+  response.pause({ length: 5 });
 
   return response.toString();
 }
-
 // Gera TwiML para transferir a chamada para o SDR via WebRTC
 function generateTransferTwiML(sdrIdentity) {
   const VoiceResponse = twilio.twiml.VoiceResponse;
