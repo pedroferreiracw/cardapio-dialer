@@ -71,29 +71,42 @@ async function processLead(lead) {
 
   console.log(`[DIALER] Discando para ${lead.lead_name} (${lead.lead_phone}) → SDR: ${lead.sdr_name}`);
 
-  await pool.query(`
-    UPDATE daily_schedules
-    SET status = 'EXECUTED', executed_at = NOW()
-    WHERE id = $1
-  `, [lead.schedule_id]);
+  try {
+    const { initiateCall } = require('../services/twilioService');
+    const callSid = await initiateCall(
+      lead.id,
+      lead.lead_phone,
+      lead.sdr_id,
+      lead.lead_name
+    );
 
-  await pool.query(`
-    UPDATE leads_queue
-    SET status = 'CALLING',
-        attempts_today = attempts_today + 1,
-        total_attempts = total_attempts + 1,
-        last_attempt_at = NOW(),
-        updated_at = NOW()
-    WHERE id = $1
-  `, [lead.id]);
+    await pool.query(`
+      UPDATE daily_schedules
+      SET status = 'EXECUTED', executed_at = NOW()
+      WHERE id = $1
+    `, [lead.schedule_id]);
 
-  await pool.query(`
-    INSERT INTO call_attempts
-      (lead_queue_id, lead_id, sdr_id, phone_dialed, status)
-    VALUES ($1, $2, $3, $4, 'initiated')
-  `, [lead.id, lead.lead_id, lead.sdr_id, lead.lead_phone]);
+    await pool.query(`
+      UPDATE leads_queue
+      SET status = 'CALLING',
+          attempts_today = attempts_today + 1,
+          total_attempts = total_attempts + 1,
+          last_attempt_at = NOW(),
+          updated_at = NOW()
+      WHERE id = $1
+    `, [lead.id]);
 
-  console.log(`[DIALER] Tentativa registrada — aguardando integração Twilio`);
+    await pool.query(`
+      INSERT INTO call_attempts
+        (lead_queue_id, lead_id, sdr_id, phone_dialed, twilio_call_sid, status)
+      VALUES ($1, $2, $3, $4, $5, 'initiated')
+    `, [lead.id, lead.lead_id, lead.sdr_id, lead.lead_phone, callSid]);
+
+    console.log(`[DIALER] Ligação iniciada — SID: ${callSid}`);
+
+  } catch (err) {
+    console.error(`[DIALER] Erro ao discar para ${lead.lead_name}:`, err.message);
+  }
 }
 
 async function startDialerJob() {

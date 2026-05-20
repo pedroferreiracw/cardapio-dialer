@@ -6,6 +6,7 @@ const runMigrations = require('./config/migrations');
 const { getRedisClient } = require('./config/redis');
 const leadsRoutes = require('./routes/leads');
 const sdrsRoutes = require('./routes/sdrs');
+const twilioRoutes = require('./routes/twilio');
 const { startDialerJob } = require('./jobs/dialerJob');
 
 const app = express();
@@ -14,10 +15,12 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
 // Rotas
 app.use('/leads', leadsRoutes);
 app.use('/sdrs', sdrsRoutes);
+app.use('/twilio', twilioRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

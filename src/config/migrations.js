@@ -22,8 +22,13 @@ async function runMigrations() {
       CREATE TABLE IF NOT EXISTS sdrs (
         id VARCHAR PRIMARY KEY,
         name VARCHAR NOT NULL,
+        phone VARCHAR,
         created_at TIMESTAMP DEFAULT NOW()
       );
+    `);
+
+    await pool.query(`
+      ALTER TABLE sdrs ADD COLUMN IF NOT EXISTS phone VARCHAR;
     `);
 
     await pool.query(`
