@@ -44,15 +44,6 @@ async function initiateCall(leadQueueId, leadPhone, sdrId, leadName) {
   }
 }
 
-    console.log(`[TWILIO] Ligação iniciada → ${leadPhone} | SID: ${call.sid}`);
-    return call.sid;
-
-  } catch (err) {
-    console.error(`[TWILIO] Erro ao iniciar ligação:`, err.message);
-    throw err;
-  }
-}
-
 function generateOutboundTwiML() {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
