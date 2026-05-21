@@ -15,7 +15,7 @@ async function initiateCall(leadQueueId, leadPhone, sdrId, leadName) {
     const call = await client.calls.create({
       to: leadPhone,
       from: TWILIO_PHONE_NUMBER,
-      url: `${BACKEND_URL}/twilio/twiml/outbound?leadQueueId=${leadQueueId}&sdrId=${sdrId}`,
+      url: 'https://handler.twilio.com/twiml/EHbf62fdcde9fd40e62bd6b8ae0bdf10ff',
       statusCallback: `${BACKEND_URL}/twilio/status?leadQueueId=${leadQueueId}&sdrId=${sdrId}`,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
       statusCallbackMethod: 'POST',
