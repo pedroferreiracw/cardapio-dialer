@@ -19,6 +19,14 @@ async function initiateCall(leadQueueId, leadPhone, sdrId, leadName) {
       statusCallback: `${BACKEND_URL}/twilio/status?leadQueueId=${leadQueueId}&sdrId=${sdrId}`,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
       statusCallbackMethod: 'POST',
+      machineDetection: 'Enable',
+      asyncAmd: 'true',
+      asyncAmdStatusCallback: `${BACKEND_URL}/twilio/amd?leadQueueId=${leadQueueId}&sdrId=${sdrId}`,
+      asyncAmdStatusCallbackMethod: 'POST',
+      machineDetectionTimeout: 15,
+      machineDetectionSpeechThreshold: 2400,
+      machineDetectionSpeechEndThreshold: 1200,
+      machineDetectionSilenceTimeout: 10000,
       timeout: 40,
     });
 
