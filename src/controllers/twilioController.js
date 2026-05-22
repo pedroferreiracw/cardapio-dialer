@@ -6,13 +6,34 @@ const {
   generateVoicemailTwiML,
 } = require('../services/twilioService');
 
-// Lógica central de transferência — usada pelo AMD e pelo statusCallback
-async function transferCall(leadQueueId, sdrId, CallSid, source) {
+// Busca dados completos do lead para enviar ao painel
+async function getLeadData(leadQueueId) {
+  const result = await pool.query(`
+    SELECT 
+      lq.id,
+      lq.lead_id,
+      lq.lead_name,
+      lq.lead_phone,
+      lq.lead_email,
+      lq.lead_company,
+      lq.cadence,
+      lq.total_attempts,
+      lq.sdr_id,
+      lq.sdr_name
+    FROM leads_queue lq
+    WHERE lq.id = $1
+  `, [leadQueueId]);
+
+  return result.rows[0] || null;
+}
+
+// Lógica central de transferência
+async function transferCall(leadQueueId, sdrId, CallSid, source, io) {
   const redis = await getRedisClient();
   const sdrStatus = await redis.get(`sdr:${sdrId}:status`);
   console.log(`[${source}] Transferindo lead ${leadQueueId} → SDR ${sdrId} (status=${sdrStatus})`);
 
-  // Verifica se já foi transferido (evita dupla transferência)
+  // Verifica se já foi transferido
   const alreadyAnswered = await pool.query(
     `SELECT id FROM leads_queue WHERE id = $1 AND status = 'ANSWERED'`,
     [leadQueueId]
@@ -37,6 +58,22 @@ async function transferCall(leadQueueId, sdrId, CallSid, source) {
       SET status = 'ANSWERED', answered_at = NOW(), updated_at = NOW()
       WHERE id = $1
     `, [leadQueueId]);
+
+    // Busca dados do lead e envia para o painel via WebSocket
+    const leadData = await getLeadData(leadQueueId);
+    if (leadData && io) {
+      io.to(`sdr_${sdrId}`).emit('incoming_call', {
+        lead_id: leadData.lead_id,
+        lead_name: leadData.lead_name,
+        lead_phone: leadData.lead_phone,
+        lead_email: leadData.lead_email,
+        lead_company: leadData.lead_company,
+        cadence: leadData.cadence,
+        attempt: leadData.total_attempts,
+        call_sid: CallSid
+      });
+      console.log(`[${source}] Dados do lead enviados via WebSocket para sdr_${sdrId}`);
+    }
 
     const { client } = require('../services/twilioService');
     await client.calls(CallSid).update({
@@ -73,15 +110,14 @@ async function outboundTwiML(req, res) {
 async function amdCallback(req, res) {
   const { leadQueueId, sdrId } = req.query;
   const { AnsweredBy, CallSid } = req.body;
+  const io = req.app.get('io');
 
   console.log(`[AMD] Lead ${leadQueueId} → AnsweredBy: ${AnsweredBy}`);
 
   try {
     if (AnsweredBy === 'human') {
-      await transferCall(leadQueueId, sdrId, CallSid, 'AMD');
-
+      await transferCall(leadQueueId, sdrId, CallSid, 'AMD', io);
     } else {
-      // Caixa postal — desliga silenciosamente
       console.log(`[AMD] Caixa postal detectada — encerrando`);
       const { client } = require('../services/twilioService');
       await client.calls(CallSid).update({
@@ -106,19 +142,19 @@ async function amdCallback(req, res) {
 async function statusCallback(req, res) {
   const { leadQueueId, sdrId } = req.query;
   const { CallStatus, CallSid, CallDuration } = req.body;
+  const io = req.app.get('io');
 
   console.log(`[STATUS] Lead ${leadQueueId} → ${CallStatus}`);
 
   try {
-    // Fallback: se in-progress e AMD ainda não transferiu, transfere aqui
     if (CallStatus === 'in-progress') {
       setTimeout(async () => {
         try {
-          await transferCall(leadQueueId, sdrId, CallSid, 'STATUS-FALLBACK');
+          await transferCall(leadQueueId, sdrId, CallSid, 'STATUS-FALLBACK', io);
         } catch (err) {
           console.log(`[STATUS-FALLBACK] Ignorado: ${err.message}`);
         }
-      }, 8000); // Aguarda 8s para o AMD ter chance de agir primeiro
+      }, 8000);
     }
 
     if (CallStatus === 'no-answer' || CallStatus === 'busy' || CallStatus === 'failed') {
@@ -141,6 +177,15 @@ async function statusCallback(req, res) {
         SET status = 'completed', duration_seconds = $1
         WHERE twilio_call_sid = $2
       `, [parseInt(CallDuration), CallSid]);
+
+      // Notifica painel que a chamada encerrou
+      if (io) {
+        io.to(`sdr_${sdrId}`).emit('call_ended', {
+          leadQueueId,
+          callSid: CallSid,
+          duration: parseInt(CallDuration)
+        });
+      }
 
       const redis = await getRedisClient();
       const sdrStatus = await redis.get(`sdr:${sdrId}:status`);

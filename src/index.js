@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const http = require('http');
+const { Server } = require('socket.io');
 const runMigrations = require('./config/migrations');
 const { getRedisClient } = require('./config/redis');
 const leadsRoutes = require('./routes/leads');
@@ -11,12 +13,23 @@ const tokenRoutes = require('./routes/token');
 const { startDialerJob } = require('./jobs/dialerJob');
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+// Disponibiliza o io para os controllers
+app.set('io', io);
 
 // Rotas
 app.use('/leads', leadsRoutes);
@@ -33,12 +46,27 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Conexões WebSocket
+io.on('connection', (socket) => {
+  console.log(`[SOCKET] Cliente conectado: ${socket.id}`);
+
+  // SDR se registra informando seu ID
+  socket.on('register_sdr', (sdrId) => {
+    socket.join(`sdr_${sdrId}`);
+    console.log(`[SOCKET] SDR ${sdrId} registrado na sala sdr_${sdrId}`);
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`[SOCKET] Cliente desconectado: ${socket.id}`);
+  });
+});
+
 async function start() {
   try {
     await runMigrations();
     await getRedisClient();
     startDialerJob();
-    app.listen(PORT, () => {
+    server.listen(PORT, () => {
       console.log(`Servidor rodando na porta ${PORT}`);
     });
   } catch (err) {
@@ -49,4 +77,4 @@ async function start() {
 
 start();
 
-module.exports = app;
+module.exports = { app, io };
