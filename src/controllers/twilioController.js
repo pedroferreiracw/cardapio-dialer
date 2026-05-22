@@ -87,6 +87,43 @@ async function statusCallback(req, res) {
   console.log(`[STATUS] Lead ${leadQueueId} → ${CallStatus}`);
 
   try {
+    if (CallStatus === 'in-progress') {
+      const redis = await getRedisClient();
+      const sdrStatus = await redis.get(`sdr:${sdrId}:status`);
+      const forceOnline = process.env.FORCE_SDR_ONLINE === sdrId;
+
+      console.log(`[STATUS] SDR ${sdrId} status=${sdrStatus} forceOnline=${forceOnline}`);
+
+      if (sdrStatus === 'ONLINE' || forceOnline) {
+        const sdrIdentity = `sdr_${sdrId}`;
+
+        await redis.setEx(`sdr:${sdrId}:status`, 43200, 'BUSY');
+        await redis.setEx(`sdr:${sdrId}:current_call`, 43200, JSON.stringify({
+          leadQueueId,
+          callSid: CallSid,
+          startedAt: new Date().toISOString()
+        }));
+
+        await pool.query(`
+          UPDATE leads_queue
+          SET status = 'ANSWERED', answered_at = NOW(), updated_at = NOW()
+          WHERE id = $1
+        `, [leadQueueId]);
+
+        const { client } = require('../services/twilioService');
+        await client.calls(CallSid).update({
+          twiml: generateTransferTwiML(sdrIdentity)
+        });
+
+        console.log(`[STATUS] Transferindo para SDR ${sdrIdentity}`);
+      } else {
+        const { client } = require('../services/twilioService');
+        await client.calls(CallSid).update({
+          twiml: generateNoSdrTwiML()
+        });
+      }
+    }
+
     if (CallStatus === 'no-answer' || CallStatus === 'busy' || CallStatus === 'failed') {
       await pool.query(`
         UPDATE call_attempts
