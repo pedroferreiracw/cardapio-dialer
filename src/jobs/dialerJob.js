@@ -4,22 +4,28 @@ const { getRedisClient } = require('../config/redis');
 
 // Busca leads prontos para discar — sem restrição de horário
 async function getLeadsDueNow() {
+  // Primeiro busca SDRs online
+  const onlineSdrs = await getOnlineSdrs();
+  if (onlineSdrs.length === 0) return [];
+
   const result = await pool.query(`
     SELECT lq.*
     FROM leads_queue lq
-    WHERE lq.status IN ('PENDING', 'CALLING')
+    WHERE lq.sdr_id = ANY($1::varchar[])
+      AND lq.status IN ('PENDING', 'CALLING')
       AND lq.status NOT IN ('WON', 'LOST', 'ARCHIVED', 'ANSWERED', 'SCHEDULED', 'WRONG_NUMBER')
       AND (
         lq.last_attempt_at IS NULL
         OR lq.last_attempt_at <= NOW() - INTERVAL '30 minutes'
       )
       AND lq.total_attempts < lq.max_attempts
-    ORDER BY 
+    ORDER BY
       lq.last_attempt_at ASC NULLS FIRST,
       lq.created_at ASC
-    LIMIT 50
-  `);
+    LIMIT 10
+  `, [onlineSdrs]);
 
+  console.log(`[DIALER] ${result.rows.length} lead(s) para SDRs online (${onlineSdrs.join(', ')})`);
   return result.rows;
 }
 
