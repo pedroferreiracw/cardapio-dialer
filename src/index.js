@@ -10,6 +10,8 @@ const leadsRoutes = require('./routes/leads');
 const sdrsRoutes = require('./routes/sdrs');
 const twilioRoutes = require('./routes/twilio');
 const tokenRoutes = require('./routes/token');
+const authRoutes = require('./routes/auth');
+const notesRoutes = require('./routes/notes');
 const { startDialerJob } = require('./jobs/dialerJob');
 
 const app = express();
@@ -28,7 +30,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Disponibiliza o io para os controllers
 app.set('io', io);
 
 // Rotas
@@ -36,6 +37,8 @@ app.use('/leads', leadsRoutes);
 app.use('/sdrs', sdrsRoutes);
 app.use('/twilio', twilioRoutes);
 app.use('/token', tokenRoutes);
+app.use('/auth', authRoutes);
+app.use('/notes', notesRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -50,7 +53,6 @@ app.get('/health', (req, res) => {
 io.on('connection', (socket) => {
   console.log(`[SOCKET] Cliente conectado: ${socket.id}`);
 
-  // SDR se registra informando seu ID
   socket.on('register_sdr', (sdrId) => {
     socket.join(`sdr_${sdrId}`);
     console.log(`[SOCKET] SDR ${sdrId} registrado na sala sdr_${sdrId}`);

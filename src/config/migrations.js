@@ -86,7 +86,17 @@ async function runMigrations() {
       );
     `);
 
-    // Insere configuração padrão se não existir
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS lead_notes (
+        id SERIAL PRIMARY KEY,
+        lead_id VARCHAR NOT NULL,
+        sdr_id VARCHAR NOT NULL,
+        notes TEXT DEFAULT '',
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(lead_id, sdr_id)
+      );
+    `);
+
     await pool.query(`
       INSERT INTO cadence_config (id)
       VALUES (1)
