@@ -59,7 +59,7 @@ async function transferCall(leadQueueId, sdrId, CallSid, source, io) {
       WHERE id = $1
     `, [leadQueueId]);
 
-    // Busca dados do lead e envia para o painel via WebSocket
+    // Envia dados do lead para o painel via WebSocket antes de transferir
     const leadData = await getLeadData(leadQueueId);
     if (leadData && io) {
       io.to(`sdr_${sdrId}`).emit('incoming_call', {
@@ -91,33 +91,25 @@ async function transferCall(leadQueueId, sdrId, CallSid, source, io) {
   }
 }
 
-// Retorna TwiML inicial quando o lead atende
+// TwiML inicial — sem mensagem, transfere imediatamente
 async function outboundTwiML(req, res) {
-  console.log(`[TWIML] Endpoint chamado — leadQueueId=${req.query.leadQueueId}`);
   res.set('Content-Type', 'text/xml');
   const twilio = require('twilio');
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
-  response.pause({ length: 2 });
-  response.say('Ola, aguarde um momento por favor.');
-  response.pause({ length: 5 });
-  response.say('Obrigado pela sua paciencia.');
-  response.pause({ length: 5 });
+  response.pause({ length: 1 });
   res.send(response.toString());
 }
 
-// Recebe resultado do AMD
+// AMD — só usado para detectar caixa postal e desligar
 async function amdCallback(req, res) {
   const { leadQueueId, sdrId } = req.query;
   const { AnsweredBy, CallSid } = req.body;
-  const io = req.app.get('io');
 
   console.log(`[AMD] Lead ${leadQueueId} → AnsweredBy: ${AnsweredBy}`);
 
   try {
-    if (AnsweredBy === 'human') {
-      await transferCall(leadQueueId, sdrId, CallSid, 'AMD', io);
-    } else {
+    if (AnsweredBy !== 'human') {
       console.log(`[AMD] Caixa postal detectada — encerrando`);
       const { client } = require('../services/twilioService');
       await client.calls(CallSid).update({
@@ -130,7 +122,7 @@ async function amdCallback(req, res) {
         WHERE twilio_call_sid = $1
       `, [CallSid]);
     }
-
+    // Se humano, não faz nada — statusCallback já transferiu
   } catch (err) {
     console.error('[AMD] Erro:', err.message);
   }
@@ -138,7 +130,7 @@ async function amdCallback(req, res) {
   res.sendStatus(200);
 }
 
-// Recebe atualizações de status da chamada
+// Status callback — transfere IMEDIATAMENTE quando lead atende
 async function statusCallback(req, res) {
   const { leadQueueId, sdrId } = req.query;
   const { CallStatus, CallSid, CallDuration } = req.body;
@@ -147,14 +139,9 @@ async function statusCallback(req, res) {
   console.log(`[STATUS] Lead ${leadQueueId} → ${CallStatus}`);
 
   try {
+    // Transfere imediatamente quando lead atende
     if (CallStatus === 'in-progress') {
-      setTimeout(async () => {
-        try {
-          await transferCall(leadQueueId, sdrId, CallSid, 'STATUS-FALLBACK', io);
-        } catch (err) {
-          console.log(`[STATUS-FALLBACK] Ignorado: ${err.message}`);
-        }
-      }, 8000);
+      await transferCall(leadQueueId, sdrId, CallSid, 'STATUS', io);
     }
 
     if (CallStatus === 'no-answer' || CallStatus === 'busy' || CallStatus === 'failed') {
@@ -178,7 +165,6 @@ async function statusCallback(req, res) {
         WHERE twilio_call_sid = $2
       `, [parseInt(CallDuration), CallSid]);
 
-      // Notifica painel que a chamada encerrou
       if (io) {
         io.to(`sdr_${sdrId}`).emit('call_ended', {
           leadQueueId,

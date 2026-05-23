@@ -42,37 +42,25 @@ async function initiateCall(leadQueueId, leadPhone, sdrId, leadName) {
 function generateOutboundTwiML() {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
-
-  response.pause({ length: 2 });
-  response.say('Ola, aguarde um momento por favor.');
-  response.pause({ length: 5 });
-  response.say('Obrigado pela sua paciencia.');
-  response.pause({ length: 5 });
-
+  response.pause({ length: 1 });
   return response.toString();
 }
 
+// Transferência instantânea — sem mensagem, SDR assume imediatamente
 function generateTransferTwiML(sdrIdentity) {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
-
-  response.say('Conectando com nosso consultor.');
-
   const dial = response.dial({
     timeout: 30,
     action: `${BACKEND_URL}/twilio/dial-complete`,
   });
-
   dial.client(sdrIdentity);
-
   return response.toString();
 }
 
 function generateNoSdrTwiML() {
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const response = new VoiceResponse();
-
-  response.say('Nossos consultores estao ocupados no momento. Entraremos em contato em breve. Obrigado.');
   response.hangup();
   return response.toString();
 }
