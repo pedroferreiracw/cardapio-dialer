@@ -2,68 +2,53 @@ const cron = require('node-cron');
 const pool = require('../config/database');
 const { getRedisClient } = require('../config/redis');
 
-async function isBusinessHours() {
-  const configResult = await pool.query('SELECT * FROM cadence_config WHERE id = 1');
-  const config = configResult.rows[0];
-
-  const now = new Date();
-  const brasiliaOffset = -3 * 60;
-  const utcOffset = now.getTimezoneOffset();
-  const brasiliaTime = new Date(now.getTime() + (utcOffset + brasiliaOffset) * 60000);
-
-  const currentMinutes = brasiliaTime.getHours() * 60 + brasiliaTime.getMinutes();
-  const dayOfWeek = brasiliaTime.getDay();
-
-  if (dayOfWeek === 0 || dayOfWeek === 6) return false;
-
-  const [startH, startM] = config.business_start.slice(0, 5).split(':').map(Number);
-  const [endH, endM] = config.business_end.slice(0, 5).split(':').map(Number);
-  const [lunchStartH, lunchStartM] = config.lunch_start.slice(0, 5).split(':').map(Number);
-  const [lunchEndH, lunchEndM] = config.lunch_end.slice(0, 5).split(':').map(Number);
-
-  const businessStart = startH * 60 + startM;
-  const businessEnd = endH * 60 + endM;
-  const lunchStart = lunchStartH * 60 + lunchStartM;
-  const lunchEnd = lunchEndH * 60 + lunchEndM;
-
-  if (currentMinutes < businessStart || currentMinutes >= businessEnd) return false;
-  if (currentMinutes >= lunchStart && currentMinutes < lunchEnd) return false;
-
-  return true;
-}
-
+// Busca leads prontos para discar — sem restrição de horário
 async function getLeadsDueNow() {
   const result = await pool.query(`
-    SELECT
-      lq.*,
-      ds.id as schedule_id,
-      ds.scheduled_at
-    FROM daily_schedules ds
-    JOIN leads_queue lq ON lq.id = ds.lead_queue_id
-    WHERE ds.status = 'PENDING'
-      AND ds.scheduled_at <= NOW()
-      AND lq.status IN ('PENDING', 'CALLING')
-      AND lq.status NOT IN ('WON', 'LOST', 'ARCHIVED')
-    ORDER BY ds.scheduled_at ASC
+    SELECT lq.*
+    FROM leads_queue lq
+    WHERE lq.status IN ('PENDING', 'CALLING')
+      AND lq.status NOT IN ('WON', 'LOST', 'ARCHIVED', 'ANSWERED', 'SCHEDULED', 'WRONG_NUMBER')
+      AND (
+        lq.last_attempt_at IS NULL
+        OR lq.last_attempt_at <= NOW() - INTERVAL '30 minutes'
+      )
+      AND lq.total_attempts < lq.max_attempts
+    ORDER BY 
+      lq.last_attempt_at ASC NULLS FIRST,
+      lq.created_at ASC
     LIMIT 50
   `);
 
-  console.log(`[DIALER] Query retornou ${result.rows.length} leads. IDs dos SDRs: ${[...new Set(result.rows.map(r => r.sdr_id))].join(', ')}`);
   return result.rows;
+}
+
+// Busca apenas SDRs que estão online no Redis
+async function getOnlineSdrs() {
+  try {
+    const redis = await getRedisClient();
+    const keys = await redis.keys('sdr:*:status');
+    const onlineSdrs = [];
+
+    for (const key of keys) {
+      const status = await redis.get(key);
+      if (status === 'ONLINE') {
+        const sdrId = key.split(':')[1];
+        onlineSdrs.push(sdrId);
+      }
+    }
+
+    return onlineSdrs;
+  } catch (err) {
+    console.error('[DIALER] Erro ao buscar SDRs online:', err.message);
+    return [];
+  }
 }
 
 async function isSdrOnline(sdrId) {
   try {
     const redis = await getRedisClient();
     const status = await redis.get(`sdr:${sdrId}:status`);
-    console.log(`[SDR CHECK] sdr_id=${sdrId} status_no_redis=${status}`);
-
-    // Se Redis não tem o status, verifica variável de ambiente de teste
-    if (!status && process.env.FORCE_SDR_ONLINE === sdrId) {
-      console.log(`[SDR CHECK] sdr_id=${sdrId} forçado ONLINE via FORCE_SDR_ONLINE`);
-      return true;
-    }
-
     return status === 'ONLINE';
   } catch (err) {
     console.error(`[SDR CHECK] Erro ao verificar SDR ${sdrId}:`, err.message);
@@ -75,8 +60,7 @@ async function processLead(lead) {
   const sdrOnline = await isSdrOnline(lead.sdr_id);
 
   if (!sdrOnline) {
-    console.log(`SDR ${lead.sdr_name} offline — ${lead.lead_name} aguardando`);
-    return;
+    return; // SDR offline — silencioso, sem log para não poluir
   }
 
   console.log(`[DIALER] Discando para ${lead.lead_name} (${lead.lead_phone}) → SDR: ${lead.sdr_name}`);
@@ -89,12 +73,6 @@ async function processLead(lead) {
       lead.sdr_id,
       lead.lead_name
     );
-
-    await pool.query(`
-      UPDATE daily_schedules
-      SET status = 'EXECUTED', executed_at = NOW()
-      WHERE id = $1
-    `, [lead.schedule_id]);
 
     await pool.query(`
       UPDATE leads_queue
@@ -115,8 +93,13 @@ async function processLead(lead) {
     console.log(`[DIALER] Ligação iniciada — SID: ${callSid}`);
 
   } catch (err) {
+    // Se falhou ao discar, volta para PENDING para tentar novamente
+    await pool.query(`
+      UPDATE leads_queue
+      SET status = 'PENDING', updated_at = NOW()
+      WHERE id = $1
+    `, [lead.id]);
     console.error(`[DIALER] Erro ao discar para ${lead.lead_name}:`, err.message);
-    console.error(`[DIALER] Stack:`, err.stack);
   }
 }
 
@@ -125,10 +108,11 @@ async function startDialerJob() {
 
   cron.schedule('* * * * *', async () => {
     try {
-      const businessHours = await isBusinessHours();
-      const forceTest = process.env.FORCE_TEST === 'true';
-      console.log(`[DIALER] businessHours=${businessHours} forceTest=${forceTest}`);
-      if (!businessHours && !forceTest) return;
+      // Verifica se há algum SDR online antes de qualquer coisa
+      const onlineSdrs = await getOnlineSdrs();
+      if (onlineSdrs.length === 0) return;
+
+      console.log(`[DIALER] ${onlineSdrs.length} SDR(s) online: ${onlineSdrs.join(', ')}`);
 
       const leads = await getLeadsDueNow();
       if (leads.length === 0) return;

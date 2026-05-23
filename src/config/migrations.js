@@ -1,4 +1,4 @@
- const pool = require('./database');
+const pool = require('./database');
 
 async function runMigrations() {
   try {
@@ -53,6 +53,10 @@ async function runMigrations() {
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
+    `);
+
+    await pool.query(`
+      ALTER TABLE leads_queue ADD COLUMN IF NOT EXISTS max_attempts INT DEFAULT 70;
     `);
 
     await pool.query(`
