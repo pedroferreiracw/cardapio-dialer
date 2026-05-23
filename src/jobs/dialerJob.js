@@ -2,12 +2,8 @@ const cron = require('node-cron');
 const pool = require('../config/database');
 const { getRedisClient } = require('../config/redis');
 
-// Busca leads prontos para discar — sem restrição de horário
-async function getLeadsDueNow() {
-  // Primeiro busca SDRs online
-  const onlineSdrs = await getOnlineSdrs();
-  if (onlineSdrs.length === 0) return [];
-
+// Busca leads prontos para discar — apenas dos SDRs online
+async function getLeadsDueNow(onlineSdrs) {
   const result = await pool.query(`
     SELECT lq.*
     FROM leads_queue lq
@@ -64,9 +60,14 @@ async function isSdrOnline(sdrId) {
 
 async function processLead(lead) {
   const sdrOnline = await isSdrOnline(lead.sdr_id);
+  if (!sdrOnline) return;
 
-  if (!sdrOnline) {
-    return; // SDR offline — silencioso, sem log para não poluir
+  // Verifica se o SDR já está em chamada ativa
+  const redis = await getRedisClient();
+  const sdrStatus = await redis.get(`sdr:${lead.sdr_id}:status`);
+  if (sdrStatus === 'BUSY') {
+    console.log(`[DIALER] SDR ${lead.sdr_name} ocupado — aguardando`);
+    return;
   }
 
   console.log(`[DIALER] Discando para ${lead.lead_name} (${lead.lead_phone}) → SDR: ${lead.sdr_name}`);
@@ -99,10 +100,8 @@ async function processLead(lead) {
     console.log(`[DIALER] Ligação iniciada — SID: ${callSid}`);
 
   } catch (err) {
-    // Se falhou ao discar, volta para PENDING para tentar novamente
     await pool.query(`
-      UPDATE leads_queue
-      SET status = 'PENDING', updated_at = NOW()
+      UPDATE leads_queue SET status = 'PENDING', updated_at = NOW()
       WHERE id = $1
     `, [lead.id]);
     console.error(`[DIALER] Erro ao discar para ${lead.lead_name}:`, err.message);
@@ -114,18 +113,25 @@ async function startDialerJob() {
 
   cron.schedule('* * * * *', async () => {
     try {
-      // Verifica se há algum SDR online antes de qualquer coisa
       const onlineSdrs = await getOnlineSdrs();
       if (onlineSdrs.length === 0) return;
 
       console.log(`[DIALER] ${onlineSdrs.length} SDR(s) online: ${onlineSdrs.join(', ')}`);
 
-      const leads = await getLeadsDueNow();
+      const leads = await getLeadsDueNow(onlineSdrs);
       if (leads.length === 0) return;
 
-      console.log(`[DIALER] ${leads.length} lead(s) para discar agora`);
-
+      // Agrupa leads por SDR e pega apenas o primeiro de cada
+      const leadsBySdr = {};
       for (const lead of leads) {
+        if (!leadsBySdr[lead.sdr_id]) {
+          leadsBySdr[lead.sdr_id] = lead;
+        }
+      }
+
+      console.log(`[DIALER] Processando 1 lead por SDR — ${Object.keys(leadsBySdr).length} SDR(s) com leads`);
+
+      for (const lead of Object.values(leadsBySdr)) {
         await processLead(lead);
       }
     } catch (err) {
