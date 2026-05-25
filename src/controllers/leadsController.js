@@ -1,5 +1,6 @@
 const pool = require('../config/database');
 const { generateFullCadence } = require('../services/scheduleService');
+const { sendAnnotationsToMeetime } = require('./meetimeController');
 
 async function receiveLead(req, res) {
   const {
@@ -94,10 +95,10 @@ async function updateLeadStatus(req, res) {
   const { lead_id } = req.params;
   const { status } = req.body;
 
-  const validStatuses = ['WON', 'LOST', 'SCHEDULED', 'WRONG_NUMBER'];
+  const validStatuses = ['WON', 'LOST', 'SCHEDULED', 'WRONG_NUMBER', 'PENDING', 'ANSWERED'];
   if (!validStatuses.includes(status)) {
     return res.status(400).json({ 
-      error: 'Status inválido. Use WON, LOST, SCHEDULED ou WRONG_NUMBER' 
+      error: 'Status inválido' 
     });
   }
 
@@ -107,16 +108,6 @@ async function updateLeadStatus(req, res) {
       SET status = $1, updated_at = NOW()
       WHERE lead_id = $2 AND status NOT IN ('WON', 'LOST', 'ARCHIVED')
     `, [status, lead_id]);
-
-    await pool.query(`
-      UPDATE daily_schedules ds
-      SET status = 'SKIPPED'
-      FROM leads_queue lq
-      WHERE ds.lead_queue_id = lq.id
-        AND lq.lead_id = $1
-        AND ds.scheduled_at > NOW()
-        AND ds.status = 'PENDING'
-    `, [lead_id]);
 
     return res.json({ 
       message: `Lead marcado como ${status} com sucesso` 
@@ -128,4 +119,75 @@ async function updateLeadStatus(req, res) {
   }
 }
 
-module.exports = { receiveLead, getLeadStatus, updateLeadStatus };
+// Endpoint principal de resultado da ligação
+async function registerOutcome(req, res) {
+  const { lead_id } = req.params;
+  const { outcome, sdr_id, notes, closer_email, closer_name, scheduled_at } = req.body;
+
+  const validOutcomes = ['WON', 'LOST', 'SCHEDULED', 'PENDING'];
+  if (!validOutcomes.includes(outcome)) {
+    return res.status(400).json({ error: 'Outcome inválido' });
+  }
+
+  try {
+    // Busca o lead para pegar o lead_id original da Meetime
+    const leadResult = await pool.query(
+      'SELECT * FROM leads_queue WHERE lead_id = $1 ORDER BY created_at DESC LIMIT 1',
+      [lead_id]
+    );
+
+    if (leadResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Lead não encontrado' });
+    }
+
+    const lead = leadResult.rows[0];
+
+    // Atualiza status no banco
+    let newStatus = outcome;
+    if (outcome === 'SCHEDULED') newStatus = 'WON'; // Reunião agendada = ganho no discador
+
+    await pool.query(`
+      UPDATE leads_queue
+      SET status = $1, updated_at = NOW()
+      WHERE lead_id = $2 AND status NOT IN ('WON', 'LOST', 'ARCHIVED')
+    `, [newStatus, lead_id]);
+
+    // Salva anotações localmente se houver
+    if (notes && sdr_id) {
+      await pool.query(`
+        INSERT INTO lead_notes (lead_id, sdr_id, notes, updated_at)
+        VALUES ($1, $2, $3, NOW())
+        ON CONFLICT (lead_id, sdr_id)
+        DO UPDATE SET notes = $3, updated_at = NOW()
+      `, [lead_id, sdr_id, notes]);
+    }
+
+    // Envia anotações para a Meetime se for WON, LOST ou SCHEDULED
+    if (['WON', 'LOST', 'SCHEDULED'].includes(outcome) && notes) {
+      let meetimeNotes = notes;
+
+      if (outcome === 'SCHEDULED' && closer_name) {
+        meetimeNotes = `Reunião agendada com closer: ${closer_name}\n${closer_email ? `E-mail: ${closer_email}\n` : ''}${scheduled_at ? `Data: ${new Date(scheduled_at).toLocaleString('pt-BR', { timeZone: 'America/Fortaleza' })}\n` : ''}\n${notes}`;
+      }
+
+      // Envia para Meetime em background (não bloqueia a resposta)
+      sendAnnotationsToMeetime(lead_id, meetimeNotes).catch(err => {
+        console.error('[OUTCOME] Erro ao enviar anotações para Meetime:', err.message);
+      });
+    }
+
+    console.log(`[OUTCOME] Lead ${lead_id} → ${outcome} por SDR ${sdr_id}`);
+
+    return res.json({ 
+      message: `Outcome registrado: ${outcome}`,
+      lead_id,
+      outcome
+    });
+
+  } catch (err) {
+    console.error('Erro ao registrar outcome:', err);
+    return res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+}
+
+module.exports = { receiveLead, getLeadStatus, updateLeadStatus, registerOutcome };
