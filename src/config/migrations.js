@@ -103,6 +103,30 @@ async function runMigrations() {
       ON CONFLICT (id) DO NOTHING;
     `);
 
+    await pool.query(`
+  CREATE TABLE IF NOT EXISTS closers (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR NOT NULL,
+    email VARCHAR NOT NULL UNIQUE,
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW()
+  );
+`);
+
+await pool.query(`
+  INSERT INTO closers (name, email) VALUES
+    ('Gregory Lavor', 'gregory.lavor@cardapioweb.com'),
+    ('Leandro dos Santos', 'leandro.santos@cardapioweb.com'),
+    ('Gustavo Duarte', 'gustavo.duarte@cardapioweb.com'),
+    ('Luan Nicolas', 'luan.nicolas@cardapioweb.com'),
+    ('Leonardo dos Santos', 'leonardo.santos@cardapioweb.com'),
+    ('Guilherme Gomes', 'guilherme.silva@cardapioweb.com'),
+    ('Letícia Wendy', 'leticia.silva@cardapioweb.com'),
+    ('Rebeca Cabral', 'rebeca.garcez@cardapioweb.com'),
+    ('Ranier Oliveira', 'johnathan.oliveira@cardapioweb.com')
+  ON CONFLICT (email) DO NOTHING;
+`);
+
     console.log('Tabelas criadas com sucesso!');
 
   } catch (err) {

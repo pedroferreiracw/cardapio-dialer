@@ -12,6 +12,8 @@ const twilioRoutes = require('./routes/twilio');
 const tokenRoutes = require('./routes/token');
 const authRoutes = require('./routes/auth');
 const notesRoutes = require('./routes/notes');
+const closersRoutes = require('./routes/closers');
+const webhooksRoutes = require('./routes/webhooks');
 const { startDialerJob } = require('./jobs/dialerJob');
 
 const app = express();
@@ -39,6 +41,8 @@ app.use('/twilio', twilioRoutes);
 app.use('/token', tokenRoutes);
 app.use('/auth', authRoutes);
 app.use('/notes', notesRoutes);
+app.use('/closers', closersRoutes);
+app.use('/webhooks', webhooksRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
