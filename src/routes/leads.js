@@ -27,6 +27,7 @@ router.delete('/queue/clear', async (req, res) => {
   try {
     await pool.query('DELETE FROM call_attempts');
     await pool.query('DELETE FROM lead_notes');
+    await pool.query('DELETE FROM daily_schedules');
     await pool.query('DELETE FROM leads_queue');
 
     res.json({ message: 'Fila limpa com sucesso' });
