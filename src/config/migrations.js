@@ -127,6 +127,22 @@ await pool.query(`
   ON CONFLICT (email) DO NOTHING;
 `);
 
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS call_outcomes (
+    id SERIAL PRIMARY KEY,
+    lead_id VARCHAR NOT NULL,
+    sdr_id VARCHAR NOT NULL,
+    sdr_name VARCHAR,
+    lead_name VARCHAR,
+    lead_company VARCHAR,
+    outcome VARCHAR NOT NULL,
+    notes TEXT,
+    closer_name VARCHAR,
+    scheduled_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW()
+  );
+`);
+
     console.log('Tabelas criadas com sucesso!');
 
   } catch (err) {

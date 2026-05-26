@@ -119,7 +119,6 @@ async function updateLeadStatus(req, res) {
   }
 }
 
-// Endpoint principal de resultado da ligação
 async function registerOutcome(req, res) {
   const { lead_id } = req.params;
   const { outcome, sdr_id, notes, closer_email, closer_name, scheduled_at } = req.body;
@@ -130,7 +129,6 @@ async function registerOutcome(req, res) {
   }
 
   try {
-    // Busca o lead para pegar o lead_id original da Meetime
     const leadResult = await pool.query(
       'SELECT * FROM leads_queue WHERE lead_id = $1 ORDER BY created_at DESC LIMIT 1',
       [lead_id]
@@ -144,7 +142,7 @@ async function registerOutcome(req, res) {
 
     // Atualiza status no banco
     let newStatus = outcome;
-    if (outcome === 'SCHEDULED') newStatus = 'WON'; // Reunião agendada = ganho no discador
+    if (outcome === 'SCHEDULED') newStatus = 'WON';
 
     await pool.query(`
       UPDATE leads_queue
@@ -152,7 +150,24 @@ async function registerOutcome(req, res) {
       WHERE lead_id = $2 AND status NOT IN ('WON', 'LOST', 'ARCHIVED')
     `, [newStatus, lead_id]);
 
-    // Salva anotações localmente se houver
+    // Registra o outcome no histórico
+    await pool.query(`
+      INSERT INTO call_outcomes 
+        (lead_id, sdr_id, sdr_name, lead_name, lead_company, outcome, notes, closer_name, scheduled_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `, [
+      lead_id,
+      sdr_id || lead.sdr_id,
+      lead.sdr_name,
+      lead.lead_name,
+      lead.lead_company,
+      outcome,
+      notes || '',
+      closer_name || null,
+      scheduled_at || null
+    ]);
+
+    // Salva anotações localmente
     if (notes && sdr_id) {
       await pool.query(`
         INSERT INTO lead_notes (lead_id, sdr_id, notes, updated_at)
@@ -162,7 +177,7 @@ async function registerOutcome(req, res) {
       `, [lead_id, sdr_id, notes]);
     }
 
-    // Envia anotações para a Meetime se for WON, LOST ou SCHEDULED
+    // Envia anotações para a Meetime em background
     if (['WON', 'LOST', 'SCHEDULED'].includes(outcome) && notes) {
       let meetimeNotes = notes;
 
@@ -170,7 +185,6 @@ async function registerOutcome(req, res) {
         meetimeNotes = `Reunião agendada com closer: ${closer_name}\n${closer_email ? `E-mail: ${closer_email}\n` : ''}${scheduled_at ? `Data: ${new Date(scheduled_at).toLocaleString('pt-BR', { timeZone: 'America/Fortaleza' })}\n` : ''}\n${notes}`;
       }
 
-      // Envia para Meetime em background (não bloqueia a resposta)
       sendAnnotationsToMeetime(lead_id, meetimeNotes).catch(err => {
         console.error('[OUTCOME] Erro ao enviar anotações para Meetime:', err.message);
       });
