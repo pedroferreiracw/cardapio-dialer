@@ -1,4 +1,5 @@
 const pool = require('../config/database');
+const { sendAnnotationsToMeetime } = require('./meetimeController');
 
 async function saveNotes(req, res) {
   const { lead_id, sdr_id, notes } = req.body;
@@ -44,4 +45,29 @@ async function getNotes(req, res) {
   }
 }
 
-module.exports = { saveNotes, getNotes };
+// Sincroniza anotações com a Meetime
+async function syncMeetime(req, res) {
+  const { lead_id } = req.params;
+  const { notes } = req.body;
+
+  if (!notes || !notes.trim()) {
+    return res.status(400).json({ error: 'Anotações não podem ser vazias' });
+  }
+
+  try {
+    const success = await sendAnnotationsToMeetime(lead_id, notes);
+
+    if (success) {
+      console.log(`[NOTES] Anotações sincronizadas com Meetime — lead ${lead_id}`);
+      return res.json({ message: 'Anotações enviadas para a Meetime com sucesso' });
+    } else {
+      return res.status(500).json({ error: 'Erro ao enviar para a Meetime' });
+    }
+
+  } catch (err) {
+    console.error('[NOTES] Erro ao sincronizar com Meetime:', err.message);
+    return res.status(500).json({ error: 'Erro ao sincronizar com Meetime' });
+  }
+}
+
+module.exports = { saveNotes, getNotes, syncMeetime };
