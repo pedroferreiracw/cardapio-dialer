@@ -34,15 +34,18 @@ async function updateSdrStatus(req, res) {
 
     } else if (status === 'OFFLINE') {
       // Encerra sessão ativa
-      await pool.query(`
-        UPDATE sdr_sessions
-        SET ended_at = NOW(),
-            duration_seconds = EXTRACT(EPOCH FROM (NOW() - started_at))::INT
+    await pool.query(`
+      UPDATE sdr_sessions
+      SET ended_at = NOW(),
+          duration_seconds = EXTRACT(EPOCH FROM (NOW() - started_at))::INT
+      WHERE id = (
+        SELECT id FROM sdr_sessions
         WHERE sdr_id = $1
           AND ended_at IS NULL
         ORDER BY started_at DESC
         LIMIT 1
-      `, [sdr_id]);
+      )
+    `, [sdr_id]);
 
       console.log(`SDR ${sdr_id} → OFFLINE — sessão encerrada`);
     }
