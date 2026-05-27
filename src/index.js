@@ -15,6 +15,7 @@ const notesRoutes = require('./routes/notes');
 const closersRoutes = require('./routes/closers');
 const webhooksRoutes = require('./routes/webhooks');
 const statsRoutes = require('./routes/stats');
+const configRoutes = require('./routes/config');
 const { startDialerJob } = require('./jobs/dialerJob');
 
 const app = express();
@@ -45,6 +46,7 @@ app.use('/notes', notesRoutes);
 app.use('/closers', closersRoutes);
 app.use('/webhooks', webhooksRoutes);
 app.use('/stats', statsRoutes);
+app.use('/config', configRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
