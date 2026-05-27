@@ -3,6 +3,12 @@ const pool = require('../config/database');
 const { getRedisClient } = require('../config/redis');
 
 async function getLeadsDueNow(onlineSdrs) {
+  // Busca intervalo configurado pelo gestor
+  const configResult = await pool.query(
+    'SELECT interval_minutes FROM cadence_config WHERE id = 1'
+  );
+  const intervalMinutes = configResult.rows[0]?.interval_minutes || 30;
+
   const result = await pool.query(`
     SELECT lq.*
     FROM leads_queue lq
@@ -11,16 +17,16 @@ async function getLeadsDueNow(onlineSdrs) {
       AND lq.status NOT IN ('WON', 'LOST', 'ARCHIVED', 'ANSWERED', 'SCHEDULED', 'WRONG_NUMBER')
       AND (
         lq.last_attempt_at IS NULL
-        OR lq.last_attempt_at <= NOW() - INTERVAL '30 minutes'
+        OR lq.last_attempt_at <= NOW() - ($2 || ' minutes')::INTERVAL
       )
       AND lq.total_attempts < lq.max_attempts
     ORDER BY
       lq.last_attempt_at ASC NULLS FIRST,
       lq.created_at ASC
     LIMIT 10
-  `, [onlineSdrs]);
+  `, [onlineSdrs, intervalMinutes]);
 
-  console.log(`[DIALER] ${result.rows.length} lead(s) para SDRs online (${onlineSdrs.join(', ')})`);
+  console.log(`[DIALER] ${result.rows.length} lead(s) para SDRs online — intervalo: ${intervalMinutes}min`);
   return result.rows;
 }
 

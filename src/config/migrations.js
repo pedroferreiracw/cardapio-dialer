@@ -154,6 +154,11 @@ await pool.query(`
   );
 `);
 
+await pool.query(`
+  ALTER TABLE cadence_config 
+  ADD COLUMN IF NOT EXISTS interval_minutes INT DEFAULT 30;
+`);
+
     console.log('Tabelas criadas com sucesso!');
 
   } catch (err) {

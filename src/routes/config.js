@@ -23,7 +23,8 @@ router.put('/', async (req, res) => {
     business_end,
     lunch_start,
     lunch_end,
-    timezone
+    timezone,
+    interval_minutes
   } = req.body;
 
   try {
@@ -36,6 +37,7 @@ router.put('/', async (req, res) => {
         lunch_start = COALESCE($5, lunch_start),
         lunch_end = COALESCE($6, lunch_end),
         timezone = COALESCE($7, timezone),
+        interval_minutes = COALESCE($8, interval_minutes),
         updated_at = NOW()
       WHERE id = 1
     `, [
@@ -45,7 +47,8 @@ router.put('/', async (req, res) => {
       business_end,
       lunch_start,
       lunch_end,
-      timezone
+      timezone,
+      interval_minutes
     ]);
 
     const result = await pool.query(
@@ -60,34 +63,6 @@ router.put('/', async (req, res) => {
 
   } catch (err) {
     console.error('[CONFIG] Erro:', err.message);
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// Atualiza intervalo entre tentativas (campo separado no Redis para acesso rápido)
-router.put('/interval', async (req, res) => {
-  const { interval_minutes } = req.body;
-
-  if (!interval_minutes || interval_minutes < 5) {
-    return res.status(400).json({ 
-      error: 'Intervalo mínimo é 5 minutos' 
-    });
-  }
-
-  try {
-    // Salva no banco como referência
-    await pool.query(`
-      UPDATE cadence_config 
-      SET updated_at = NOW()
-      WHERE id = 1
-    `);
-
-    console.log(`[CONFIG] Intervalo entre tentativas: ${interval_minutes} minutos`);
-    return res.json({ 
-      message: `Intervalo atualizado para ${interval_minutes} minutos` 
-    });
-
-  } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 });
