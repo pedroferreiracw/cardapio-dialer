@@ -2,7 +2,6 @@ const cron = require('node-cron');
 const pool = require('../config/database');
 const { getRedisClient } = require('../config/redis');
 
-// Busca leads prontos para discar — apenas dos SDRs online
 async function getLeadsDueNow(onlineSdrs) {
   const result = await pool.query(`
     SELECT lq.*
@@ -25,7 +24,6 @@ async function getLeadsDueNow(onlineSdrs) {
   return result.rows;
 }
 
-// Busca apenas SDRs que estão online no Redis
 async function getOnlineSdrs() {
   try {
     const redis = await getRedisClient();
@@ -62,7 +60,6 @@ async function processLead(lead) {
   const sdrOnline = await isSdrOnline(lead.sdr_id);
   if (!sdrOnline) return;
 
-  // Verifica se o SDR já está em chamada ativa
   const redis = await getRedisClient();
   const sdrStatus = await redis.get(`sdr:${lead.sdr_id}:status`);
   if (sdrStatus === 'BUSY') {
@@ -111,6 +108,24 @@ async function processLead(lead) {
 async function startDialerJob() {
   console.log('Scheduler iniciado — verificando leads a cada 1 minuto');
 
+  // Libera leads travados em ANSWERED ou CALLING há mais de 1 hora
+  cron.schedule('*/15 * * * *', async () => {
+    try {
+      const result = await pool.query(`
+        UPDATE leads_queue
+        SET status = 'PENDING', updated_at = NOW()
+        WHERE status IN ('ANSWERED', 'CALLING')
+          AND updated_at <= NOW() - INTERVAL '1 hour'
+      `);
+      if (result.rowCount > 0) {
+        console.log(`[DIALER] ${result.rowCount} lead(s) liberados de status travado`);
+      }
+    } catch (err) {
+      console.error('[DIALER] Erro ao liberar leads travados:', err.message);
+    }
+  });
+
+  // Job principal — roda a cada 1 minuto
   cron.schedule('* * * * *', async () => {
     try {
       const onlineSdrs = await getOnlineSdrs();
@@ -121,7 +136,6 @@ async function startDialerJob() {
       const leads = await getLeadsDueNow(onlineSdrs);
       if (leads.length === 0) return;
 
-      // Agrupa leads por SDR e pega apenas o primeiro de cada
       const leadsBySdr = {};
       for (const lead of leads) {
         if (!leadsBySdr[lead.sdr_id]) {

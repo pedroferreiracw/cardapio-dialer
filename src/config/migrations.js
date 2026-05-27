@@ -143,6 +143,17 @@ await pool.query(`
   );
 `);
 
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS sdr_sessions (
+    id SERIAL PRIMARY KEY,
+    sdr_id VARCHAR NOT NULL,
+    sdr_name VARCHAR,
+    started_at TIMESTAMP NOT NULL,
+    ended_at TIMESTAMP,
+    duration_seconds INT
+  );
+`);
+
     console.log('Tabelas criadas com sucesso!');
 
   } catch (err) {
