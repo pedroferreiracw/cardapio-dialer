@@ -95,7 +95,7 @@ async function updateLeadStatus(req, res) {
   const { lead_id } = req.params;
   const { status } = req.body;
 
-  const validStatuses = ['WON', 'LOST', 'SCHEDULED', 'WRONG_NUMBER', 'PENDING', 'ANSWERED'];
+  const validStatuses = ['WON', 'LOST', 'SCHEDULED', 'WRONG_NUMBER', 'PENDING', 'ANSWERED', 'ARCHIVED'];
   if (!validStatuses.includes(status)) {
     return res.status(400).json({ 
       error: 'Status inválido' 
