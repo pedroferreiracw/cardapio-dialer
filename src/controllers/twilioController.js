@@ -5,6 +5,7 @@ const {
   generateNoSdrTwiML,
   generateVoicemailTwiML,
 } = require('../services/twilioService');
+const { sendPushToSdr } = require('../routes/push');
 
 // Busca dados completos do lead para enviar ao painel
 async function getLeadData(leadQueueId) {
@@ -59,7 +60,7 @@ async function transferCall(leadQueueId, sdrId, CallSid, source, io) {
       WHERE id = $1
     `, [leadQueueId]);
 
-    // Envia dados do lead para o painel via WebSocket antes de transferir
+    // Envia dados do lead para o painel via WebSocket
     const leadData = await getLeadData(leadQueueId);
     if (leadData && io) {
       io.to(`sdr_${sdrId}`).emit('incoming_call', {
@@ -73,6 +74,13 @@ async function transferCall(leadQueueId, sdrId, CallSid, source, io) {
         call_sid: CallSid
       });
       console.log(`[${source}] Dados do lead enviados via WebSocket para sdr_${sdrId}`);
+
+      // Envia push notification para tela bloqueada
+      sendPushToSdr(sdrId, {
+        title: '📞 Lead atendeu!',
+        body: `${leadData.lead_name}${leadData.lead_company ? ' — ' + leadData.lead_company : ''}`,
+        url: 'https://discador.cardapioweb.com.br'
+      }).catch(() => {});
     }
 
     const { client } = require('../services/twilioService');
@@ -122,7 +130,6 @@ async function amdCallback(req, res) {
         WHERE twilio_call_sid = $1
       `, [CallSid]);
     }
-    // Se humano, não faz nada — statusCallback já transferiu
   } catch (err) {
     console.error('[AMD] Erro:', err.message);
   }
@@ -139,7 +146,6 @@ async function statusCallback(req, res) {
   console.log(`[STATUS] Lead ${leadQueueId} → ${CallStatus}`);
 
   try {
-    // Transfere imediatamente quando lead atende
     if (CallStatus === 'in-progress') {
       await transferCall(leadQueueId, sdrId, CallSid, 'STATUS', io);
     }

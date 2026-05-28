@@ -159,6 +159,15 @@ await pool.query(`
   ADD COLUMN IF NOT EXISTS interval_minutes INT DEFAULT 30;
 `);
 
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id SERIAL PRIMARY KEY,
+    sdr_id VARCHAR NOT NULL UNIQUE,
+    subscription TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT NOW()
+  );
+`);
+
     console.log('Tabelas criadas com sucesso!');
 
   } catch (err) {

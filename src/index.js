@@ -15,6 +15,7 @@ const notesRoutes = require('./routes/notes');
 const closersRoutes = require('./routes/closers');
 const webhooksRoutes = require('./routes/webhooks');
 const statsRoutes = require('./routes/stats');
+const { router: pushRoutes } = require('./routes/push');
 const configRoutes = require('./routes/config');
 const { startDialerJob } = require('./jobs/dialerJob');
 
@@ -46,6 +47,7 @@ app.use('/notes', notesRoutes);
 app.use('/closers', closersRoutes);
 app.use('/webhooks', webhooksRoutes);
 app.use('/stats', statsRoutes);
+app.use('/push', pushRoutes);
 app.use('/config', configRoutes);
 
 // Health check
