@@ -21,8 +21,8 @@ async function getLeadsDueNow(onlineSdrs) {
       )
       AND lq.total_attempts < lq.max_attempts
     ORDER BY
-      lq.last_attempt_at ASC NULLS FIRST,
-      lq.created_at ASC
+       lq.created_at DESC,
+       lq.last_attempt_at ASC NULLS FIRST
     LIMIT 10
   `, [onlineSdrs, intervalMinutes]);
 
