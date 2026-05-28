@@ -140,7 +140,6 @@ async function registerOutcome(req, res) {
 
     const lead = leadResult.rows[0];
 
-    // Atualiza status no banco
     let newStatus = outcome;
     if (outcome === 'SCHEDULED') newStatus = 'WON';
 
@@ -150,7 +149,6 @@ async function registerOutcome(req, res) {
       WHERE lead_id = $2 AND status NOT IN ('WON', 'LOST', 'ARCHIVED')
     `, [newStatus, lead_id]);
 
-    // Registra o outcome no histórico
     await pool.query(`
       INSERT INTO call_outcomes 
         (lead_id, sdr_id, sdr_name, lead_name, lead_company, outcome, notes, closer_name, scheduled_at)
@@ -167,7 +165,6 @@ async function registerOutcome(req, res) {
       scheduled_at || null
     ]);
 
-    // Salva anotações localmente
     if (notes && sdr_id) {
       await pool.query(`
         INSERT INTO lead_notes (lead_id, sdr_id, notes, updated_at)
@@ -177,14 +174,11 @@ async function registerOutcome(req, res) {
       `, [lead_id, sdr_id, notes]);
     }
 
-    // Envia anotações para a Meetime em background
     if (['WON', 'LOST', 'SCHEDULED'].includes(outcome) && notes) {
       let meetimeNotes = notes;
-
       if (outcome === 'SCHEDULED' && closer_name) {
         meetimeNotes = `Reunião agendada com closer: ${closer_name}\n${closer_email ? `E-mail: ${closer_email}\n` : ''}${scheduled_at ? `Data: ${new Date(scheduled_at).toLocaleString('pt-BR', { timeZone: 'America/Fortaleza' })}\n` : ''}\n${notes}`;
       }
-
       sendAnnotationsToMeetime(lead_id, meetimeNotes).catch(err => {
         console.error('[OUTCOME] Erro ao enviar anotações para Meetime:', err.message);
       });
@@ -204,4 +198,59 @@ async function registerOutcome(req, res) {
   }
 }
 
-module.exports = { receiveLead, getLeadStatus, updateLeadStatus, registerOutcome };
+// Agenda tentativa manual em horário específico
+async function scheduleAttempt(req, res) {
+  const { lead_id } = req.params;
+  const { scheduled_time, sdr_id } = req.body;
+
+  if (!scheduled_time) {
+    return res.status(400).json({ error: 'scheduled_time é obrigatório' });
+  }
+
+  try {
+    const scheduledDate = new Date(scheduled_time);
+
+    if (isNaN(scheduledDate.getTime())) {
+      return res.status(400).json({ error: 'Data/hora inválida' });
+    }
+
+    if (scheduledDate <= new Date()) {
+      return res.status(400).json({ error: 'Horário deve ser no futuro' });
+    }
+
+    // Calcula o last_attempt_at necessário para o scheduler ligar no horário certo
+    // O scheduler liga quando: last_attempt_at <= NOW() - interval_minutes
+    // Então: last_attempt_at = scheduled_time - interval_minutes
+    const configResult = await pool.query(
+      'SELECT interval_minutes FROM cadence_config WHERE id = 1'
+    );
+    const intervalMinutes = configResult.rows[0]?.interval_minutes || 30;
+
+    const fakeLastAttempt = new Date(
+      scheduledDate.getTime() - (intervalMinutes * 60 * 1000)
+    );
+
+    await pool.query(`
+      UPDATE leads_queue
+      SET status = 'PENDING',
+          last_attempt_at = $1,
+          updated_at = NOW()
+      WHERE lead_id = $2
+        AND status NOT IN ('WON', 'LOST', 'ARCHIVED')
+    `, [fakeLastAttempt.toISOString(), lead_id]);
+
+    console.log(`[SCHEDULE] Lead ${lead_id} agendado para ${scheduledDate.toLocaleString('pt-BR', { timeZone: 'America/Fortaleza' })} por SDR ${sdr_id}`);
+
+    return res.json({
+      message: `Próxima tentativa agendada para ${scheduledDate.toLocaleString('pt-BR', { timeZone: 'America/Fortaleza' })}`,
+      lead_id,
+      scheduled_time: scheduledDate.toISOString()
+    });
+
+  } catch (err) {
+    console.error('Erro ao agendar tentativa:', err);
+    return res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+}
+
+module.exports = { receiveLead, getLeadStatus, updateLeadStatus, registerOutcome, scheduleAttempt };

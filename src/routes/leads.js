@@ -4,7 +4,8 @@ const {
   receiveLead, 
   getLeadStatus, 
   updateLeadStatus,
-  registerOutcome
+  registerOutcome,
+  scheduleAttempt
 } = require('../controllers/leadsController');
 
 // Recebe lead do N8N
@@ -18,5 +19,8 @@ router.patch('/:lead_id/status', updateLeadStatus);
 
 // Registra resultado da ligação (outcome)
 router.post('/:lead_id/outcome', registerOutcome);
+
+// Agenda tentativa manual em horário específico
+router.post('/:lead_id/schedule', scheduleAttempt);
 
 module.exports = router;
