@@ -168,6 +168,20 @@ await pool.query(`
   );
 `);
 
+await pool.query(`
+  ALTER TABLE cadence_config 
+  ADD COLUMN IF NOT EXISTS daily_goal_meetings INT DEFAULT 5;
+`);
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS sdr_goals (
+    id SERIAL PRIMARY KEY,
+    sdr_id VARCHAR NOT NULL UNIQUE,
+    daily_goal_meetings INT DEFAULT 5,
+    updated_at TIMESTAMP DEFAULT NOW()
+  );
+`);
+
     console.log('Tabelas criadas com sucesso!');
 
   } catch (err) {
