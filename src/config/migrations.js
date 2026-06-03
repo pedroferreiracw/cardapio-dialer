@@ -74,6 +74,11 @@ async function runMigrations() {
     `);
 
     await pool.query(`
+      ALTER TABLE call_attempts
+      ADD COLUMN IF NOT EXISTS telnyx_call_control_id VARCHAR;
+    `);
+
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS daily_schedules (
         id SERIAL PRIMARY KEY,
         lead_queue_id INT REFERENCES leads_queue(id),
@@ -104,83 +109,83 @@ async function runMigrations() {
     `);
 
     await pool.query(`
-  CREATE TABLE IF NOT EXISTS closers (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR NOT NULL,
-    email VARCHAR NOT NULL UNIQUE,
-    active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT NOW()
-  );
-`);
+      CREATE TABLE IF NOT EXISTS closers (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR NOT NULL,
+        email VARCHAR NOT NULL UNIQUE,
+        active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
 
-await pool.query(`
-  INSERT INTO closers (name, email) VALUES
-    ('Gregory Lavor', 'gregory.lavor@cardapioweb.com'),
-    ('Leandro dos Santos', 'leandro.santos@cardapioweb.com'),
-    ('Gustavo Duarte', 'gustavo.duarte@cardapioweb.com'),
-    ('Luan Nicolas', 'luan.nicolas@cardapioweb.com'),
-    ('Leonardo dos Santos', 'leonardo.santos@cardapioweb.com'),
-    ('Guilherme Gomes', 'guilherme.silva@cardapioweb.com'),
-    ('Letícia Wendy', 'leticia.silva@cardapioweb.com'),
-    ('Rebeca Cabral', 'rebeca.garcez@cardapioweb.com'),
-    ('Ranier Oliveira', 'johnathan.oliveira@cardapioweb.com')
-  ON CONFLICT (email) DO NOTHING;
-`);
+    await pool.query(`
+      INSERT INTO closers (name, email) VALUES
+        ('Gregory Lavor', 'gregory.lavor@cardapioweb.com'),
+        ('Leandro dos Santos', 'leandro.santos@cardapioweb.com'),
+        ('Gustavo Duarte', 'gustavo.duarte@cardapioweb.com'),
+        ('Luan Nicolas', 'luan.nicolas@cardapioweb.com'),
+        ('Leonardo dos Santos', 'leonardo.santos@cardapioweb.com'),
+        ('Guilherme Gomes', 'guilherme.silva@cardapioweb.com'),
+        ('Letícia Wendy', 'leticia.silva@cardapioweb.com'),
+        ('Rebeca Cabral', 'rebeca.garcez@cardapioweb.com'),
+        ('Ranier Oliveira', 'johnathan.oliveira@cardapioweb.com')
+      ON CONFLICT (email) DO NOTHING;
+    `);
 
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS call_outcomes (
-    id SERIAL PRIMARY KEY,
-    lead_id VARCHAR NOT NULL,
-    sdr_id VARCHAR NOT NULL,
-    sdr_name VARCHAR,
-    lead_name VARCHAR,
-    lead_company VARCHAR,
-    outcome VARCHAR NOT NULL,
-    notes TEXT,
-    closer_name VARCHAR,
-    scheduled_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT NOW()
-  );
-`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS call_outcomes (
+        id SERIAL PRIMARY KEY,
+        lead_id VARCHAR NOT NULL,
+        sdr_id VARCHAR NOT NULL,
+        sdr_name VARCHAR,
+        lead_name VARCHAR,
+        lead_company VARCHAR,
+        outcome VARCHAR NOT NULL,
+        notes TEXT,
+        closer_name VARCHAR,
+        scheduled_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
 
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS sdr_sessions (
-    id SERIAL PRIMARY KEY,
-    sdr_id VARCHAR NOT NULL,
-    sdr_name VARCHAR,
-    started_at TIMESTAMP NOT NULL,
-    ended_at TIMESTAMP,
-    duration_seconds INT
-  );
-`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_sessions (
+        id SERIAL PRIMARY KEY,
+        sdr_id VARCHAR NOT NULL,
+        sdr_name VARCHAR,
+        started_at TIMESTAMP NOT NULL,
+        ended_at TIMESTAMP,
+        duration_seconds INT
+      );
+    `);
 
-await pool.query(`
-  ALTER TABLE cadence_config 
-  ADD COLUMN IF NOT EXISTS interval_minutes INT DEFAULT 30;
-`);
+    await pool.query(`
+      ALTER TABLE cadence_config
+      ADD COLUMN IF NOT EXISTS interval_minutes INT DEFAULT 30;
+    `);
 
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS push_subscriptions (
-    id SERIAL PRIMARY KEY,
-    sdr_id VARCHAR NOT NULL UNIQUE,
-    subscription TEXT NOT NULL,
-    updated_at TIMESTAMP DEFAULT NOW()
-  );
-`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id SERIAL PRIMARY KEY,
+        sdr_id VARCHAR NOT NULL UNIQUE,
+        subscription TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
 
-await pool.query(`
-  ALTER TABLE cadence_config 
-  ADD COLUMN IF NOT EXISTS daily_goal_meetings INT DEFAULT 5;
-`);
+    await pool.query(`
+      ALTER TABLE cadence_config
+      ADD COLUMN IF NOT EXISTS daily_goal_meetings INT DEFAULT 5;
+    `);
 
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS sdr_goals (
-    id SERIAL PRIMARY KEY,
-    sdr_id VARCHAR NOT NULL UNIQUE,
-    daily_goal_meetings INT DEFAULT 5,
-    updated_at TIMESTAMP DEFAULT NOW()
-  );
-`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_goals (
+        id SERIAL PRIMARY KEY,
+        sdr_id VARCHAR NOT NULL UNIQUE,
+        daily_goal_meetings INT DEFAULT 5,
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
 
     console.log('Tabelas criadas com sucesso!');
 

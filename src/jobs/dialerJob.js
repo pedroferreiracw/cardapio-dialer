@@ -3,7 +3,6 @@ const pool = require('../config/database');
 const { getRedisClient } = require('../config/redis');
 
 async function getLeadsDueNow(onlineSdrs) {
-  // Busca intervalo configurado pelo gestor
   const configResult = await pool.query(
     'SELECT interval_minutes FROM cadence_config WHERE id = 1'
   );
@@ -76,8 +75,8 @@ async function processLead(lead) {
   console.log(`[DIALER] Discando para ${lead.lead_name} (${lead.lead_phone}) → SDR: ${lead.sdr_name}`);
 
   try {
-    const { initiateCall } = require('../services/twilioService');
-    const callSid = await initiateCall(
+    const { initiateCall } = require('../services/telnyxService');
+    const callControlId = await initiateCall(
       lead.id,
       lead.lead_phone,
       lead.sdr_id,
@@ -96,11 +95,11 @@ async function processLead(lead) {
 
     await pool.query(`
       INSERT INTO call_attempts
-        (lead_queue_id, lead_id, sdr_id, phone_dialed, twilio_call_sid, status)
+        (lead_queue_id, lead_id, sdr_id, phone_dialed, telnyx_call_control_id, status)
       VALUES ($1, $2, $3, $4, $5, 'initiated')
-    `, [lead.id, lead.lead_id, lead.sdr_id, lead.lead_phone, callSid]);
+    `, [lead.id, lead.lead_id, lead.sdr_id, lead.lead_phone, callControlId]);
 
-    console.log(`[DIALER] Ligação iniciada — SID: ${callSid}`);
+    console.log(`[DIALER] Ligação iniciada — CallControlId: ${callControlId}`);
 
   } catch (err) {
     await pool.query(`
