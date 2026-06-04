@@ -2,6 +2,7 @@ const axios = require('axios');
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 const TELNYX_APP_ID = process.env.TELNYX_APP_ID;
+const TELNYX_SIP_CONNECTION_ID = process.env.TELNYX_SIP_CONNECTION_ID;
 const TELNYX_PHONE_NUMBER = process.env.TELNYX_PHONE_NUMBER;
 const BACKEND_URL = process.env.BACKEND_URL;
 
@@ -38,10 +39,10 @@ async function initiateCall(leadQueueId, leadPhone, sdrId, leadName) {
 
 async function transferCallToSdr(callControlId, sdrId) {
   await telnyxAPI.post(`/calls/${callControlId}/actions/transfer`, {
-    to: `sip:sdr_${sdrId}@cardapio-dialer.sip.telnyx.com`,
+    to: `sip:sdr${sdrId}@cardapio-dialer.sip.telnyx.com`,
     from: TELNYX_PHONE_NUMBER
   });
-  console.log(`[TELNYX] Chamada transferida para sdr_${sdrId}`);
+  console.log(`[TELNYX] Chamada transferida para sdr${sdrId}`);
 }
 
 async function hangupCall(callControlId) {
@@ -55,7 +56,7 @@ async function hangupCall(callControlId) {
 
 async function getSdrToken(sdrId) {
   try {
-    const credName = `sdr_${sdrId}`;
+    const credName = `sdr${sdrId}`;
 
     const listResponse = await telnyxAPI.get('/telephony_credentials', {
       params: { 'filter[tag]': credName }
@@ -66,7 +67,7 @@ async function getSdrToken(sdrId) {
       credId = listResponse.data.data[0].id;
     } else {
       const createResponse = await telnyxAPI.post('/telephony_credentials', {
-        connection_id: TELNYX_APP_ID,
+        connection_id: TELNYX_SIP_CONNECTION_ID,
         name: credName,
         tag: credName
       });
