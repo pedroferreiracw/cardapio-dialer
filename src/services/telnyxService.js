@@ -61,7 +61,6 @@ async function getSdrToken(sdrId) {
   try {
     const credName = `sdr_${sdrId}`;
 
-    // Busca credencial existente
     const listResponse = await telnyxAPI.get('/telephony_credentials', {
       params: { 'filter[tag]': credName }
     });
@@ -70,7 +69,6 @@ async function getSdrToken(sdrId) {
     if (listResponse.data.data && listResponse.data.data.length > 0) {
       credId = listResponse.data.data[0].id;
     } else {
-      // Cria nova credencial
       const createResponse = await telnyxAPI.post('/telephony_credentials', {
         connection_id: TELNYX_APP_ID,
         name: credName,
@@ -78,6 +76,20 @@ async function getSdrToken(sdrId) {
       });
       credId = createResponse.data.data.id;
     }
+
+    const tokenResponse = await telnyxAPI.post(
+      `/telephony_credentials/${credId}/token`, {}
+    );
+
+    console.log(`[TELNYX] Token gerado para SDR ${sdrId}`);
+    return tokenResponse.data.token;
+
+  } catch (err) {
+    // Log completo do erro Telnyx
+    console.error('[TELNYX] Erro ao gerar token:', JSON.stringify(err.response?.data || err.message));
+    throw err;
+  }
+}
 
     // Gera token de sessão
     const tokenResponse = await telnyxAPI.post(
