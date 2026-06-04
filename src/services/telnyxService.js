@@ -15,26 +15,32 @@ const telnyxAPI = axios.create({
 });
 
 async function initiateCall(leadQueueId, leadPhone, sdrId, leadName) {
-  const response = await telnyxAPI.post('/calls', {
-    connection_id: TELNYX_APP_ID,
-    to: leadPhone,
-    from: TELNYX_PHONE_NUMBER,
-    webhook_url: `${BACKEND_URL}/telnyx/status?leadQueueId=${leadQueueId}&sdrId=${sdrId}`,
-    webhook_url_method: 'POST',
-    answering_machine_detection: 'premium',
-    answering_machine_detection_config: {
-      total_analysis_time_millis: 10000,
-      after_silence_millis: 800,
-      between_words_silence_millis: 50,
-      maximum_number_of_words: 5,
-      silence_threshold: 256
-    },
-    timeout_secs: 40
-  });
+  try {
+    const response = await telnyxAPI.post('/calls', {
+      connection_id: TELNYX_APP_ID,
+      to: leadPhone,
+      from: TELNYX_PHONE_NUMBER,
+      webhook_url: `${BACKEND_URL}/telnyx/status?leadQueueId=${leadQueueId}&sdrId=${sdrId}`,
+      webhook_url_method: 'POST',
+      answering_machine_detection: 'premium',
+      answering_machine_detection_config: {
+        total_analysis_time_millis: 10000,
+        after_silence_millis: 800,
+        between_words_silence_millis: 50,
+        maximum_number_of_words: 5,
+        silence_threshold: 256
+      },
+      timeout_secs: 40
+    });
 
-  const callControlId = response.data.data.call_control_id;
-  console.log(`[TELNYX] Ligação iniciada → ${leadPhone} | ID: ${callControlId}`);
-  return callControlId;
+    const callControlId = response.data.data.call_control_id;
+    console.log(`[TELNYX] Ligação iniciada → ${leadPhone} | ID: ${callControlId}`);
+    return callControlId;
+
+  } catch (err) {
+    console.error('[TELNYX] Erro ao iniciar chamada:', JSON.stringify(err.response?.data || err.message));
+    throw err;
+  }
 }
 
 async function transferCallToSdr(callControlId, sdrId) {
