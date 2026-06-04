@@ -13,7 +13,6 @@ const telnyxAPI = axios.create({
   }
 });
 
-// Inicia ligação para o lead
 async function initiateCall(leadQueueId, leadPhone, sdrId, leadName) {
   const response = await telnyxAPI.post('/calls', {
     connection_id: TELNYX_APP_ID,
@@ -37,7 +36,6 @@ async function initiateCall(leadQueueId, leadPhone, sdrId, leadName) {
   return callControlId;
 }
 
-// Transfere chamada para o browser do SDR via SIP WebRTC
 async function transferCallToSdr(callControlId, sdrId) {
   await telnyxAPI.post(`/calls/${callControlId}/actions/transfer`, {
     to: `sip:sdr_${sdrId}@cardapio-dialer.sip.telnyx.com`,
@@ -46,7 +44,6 @@ async function transferCallToSdr(callControlId, sdrId) {
   console.log(`[TELNYX] Chamada transferida para sdr_${sdrId}`);
 }
 
-// Desliga a chamada
 async function hangupCall(callControlId) {
   try {
     await telnyxAPI.post(`/calls/${callControlId}/actions/hangup`, {});
@@ -56,7 +53,6 @@ async function hangupCall(callControlId) {
   }
 }
 
-// Gera token WebRTC para o SDR
 async function getSdrToken(sdrId) {
   try {
     const credName = `sdr_${sdrId}`;
@@ -85,22 +81,7 @@ async function getSdrToken(sdrId) {
     return tokenResponse.data.token;
 
   } catch (err) {
-    // Log completo do erro Telnyx
     console.error('[TELNYX] Erro ao gerar token:', JSON.stringify(err.response?.data || err.message));
-    throw err;
-  }
-}
-
-    // Gera token de sessão
-    const tokenResponse = await telnyxAPI.post(
-      `/telephony_credentials/${credId}/token`, {}
-    );
-
-    console.log(`[TELNYX] Token gerado para SDR ${sdrId}`);
-    return tokenResponse.data.token;
-
-  } catch (err) {
-    console.error('[TELNYX] Erro ao gerar token:', err.message);
     throw err;
   }
 }
