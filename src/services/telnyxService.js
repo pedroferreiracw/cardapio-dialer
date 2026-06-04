@@ -82,10 +82,9 @@ async function getSdrToken(sdrId) {
     console.log('[TELNYX] Token response:', JSON.stringify(tokenResponse.data));
 
     // Tenta os dois caminhos possíveis
-    const token = tokenResponse.data.token
-      || tokenResponse.data.data?.token
-      || tokenResponse.data.data?.jwt_token
-      || tokenResponse.data.jwt_token;
+    const token = typeof tokenResponse.data === 'string'
+  ? tokenResponse.data
+  : (tokenResponse.data.token || tokenResponse.data.data?.token);
 
     if (!token) {
       console.error('[TELNYX] Token não encontrado na resposta:', JSON.stringify(tokenResponse.data));
