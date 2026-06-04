@@ -78,8 +78,22 @@ async function getSdrToken(sdrId) {
       `/telephony_credentials/${credId}/token`, {}
     );
 
+    // Log para ver a estrutura exata do response
+    console.log('[TELNYX] Token response:', JSON.stringify(tokenResponse.data));
+
+    // Tenta os dois caminhos possíveis
+    const token = tokenResponse.data.token
+      || tokenResponse.data.data?.token
+      || tokenResponse.data.data?.jwt_token
+      || tokenResponse.data.jwt_token;
+
+    if (!token) {
+      console.error('[TELNYX] Token não encontrado na resposta:', JSON.stringify(tokenResponse.data));
+      throw new Error('Token não encontrado na resposta da Telnyx');
+    }
+
     console.log(`[TELNYX] Token gerado para SDR ${sdrId}`);
-    return tokenResponse.data.token;
+    return token;
 
   } catch (err) {
     console.error('[TELNYX] Erro ao gerar token:', JSON.stringify(err.response?.data || err.message));
