@@ -111,9 +111,9 @@ async function statusCallback(req, res) {
         console.log(`[TELNYX] Lead ${leadQueueId} atendeu — aguardando AMD`);
         break;
 
-      case 'call.machine.detection.ended':
+      case 'call.machine.premium.detection.ended':
         const amdResult = payload.result;
-        console.log(`[TELNYX] AMD Lead ${leadQueueId} → ${amdResult}`);
+        console.log(`[TELNYX] AMD premium Lead ${leadQueueId} → ${amdResult}`);
 
         if (amdResult === 'human') {
           await handleTransfer(leadQueueId, sdrId, callControlId, 'AMD', io);
@@ -125,6 +125,11 @@ async function statusCallback(req, res) {
             WHERE telnyx_call_control_id = $1
           `, [callControlId]);
         }
+        break;
+
+      case 'call.machine.premium.greeting.ended':
+        console.log(`[TELNYX] Saudação da caixa postal encerrada — desligando Lead ${leadQueueId}`);
+        await hangupCall(callControlId);
         break;
 
       case 'call.hangup':
