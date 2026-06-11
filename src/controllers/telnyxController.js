@@ -111,14 +111,19 @@ async function statusCallback(req, res) {
         console.log(`[TELNYX] Lead ${leadQueueId} atendeu — aguardando AMD`);
         break;
 
-      case 'call.machine.premium.detection.ended':
+      case 'call.machine.premium.detection.ended': {
         const amdResult = payload.result;
         console.log(`[TELNYX] AMD premium Lead ${leadQueueId} → ${amdResult}`);
 
-        if (amdResult === 'human') {
+        // AMD premium retorna: human_residence, human_business, machine, silence, fax_detected, not_sure
+        const isHuman = amdResult === 'human_residence'
+          || amdResult === 'human_business'
+          || amdResult === 'not_sure'; // na dúvida, transfere — melhor que perder lead
+
+        if (isHuman) {
           await handleTransfer(leadQueueId, sdrId, callControlId, 'AMD', io);
         } else {
-          console.log(`[TELNYX] Caixa postal detectada — encerrando`);
+          console.log(`[TELNYX] Caixa postal/máquina detectada (${amdResult}) — encerrando`);
           await hangupCall(callControlId);
           await pool.query(`
             UPDATE call_attempts SET status = 'voicemail'
@@ -126,13 +131,22 @@ async function statusCallback(req, res) {
           `, [callControlId]);
         }
         break;
+      }
 
-      case 'call.machine.premium.greeting.ended':
-        console.log(`[TELNYX] Saudação da caixa postal encerrada — desligando Lead ${leadQueueId}`);
-        await hangupCall(callControlId);
+      case 'call.machine.premium.greeting.ended': {
+        // Só desliga se a chamada NÃO foi transferida (lead não está ANSWERED)
+        const answered = await pool.query(
+          `SELECT id FROM leads_queue WHERE id = $1 AND status = 'ANSWERED'`,
+          [leadQueueId]
+        );
+        if (answered.rows.length === 0) {
+          console.log(`[TELNYX] Saudação de caixa postal encerrada — desligando Lead ${leadQueueId}`);
+          await hangupCall(callControlId);
+        }
         break;
+      }
 
-      case 'call.hangup':
+      case 'call.hangup': {
         const hangupCause = payload.hangup_cause;
         const durationSecs = payload.end_time && payload.start_time
           ? Math.floor((new Date(payload.end_time) - new Date(payload.start_time)) / 1000)
@@ -175,6 +189,7 @@ async function statusCallback(req, res) {
           await redis.del(`sdr:${sdrId}:current_call`);
         }
         break;
+      }
     }
   } catch (err) {
     console.error('[TELNYX] Erro no handler:', err.message);
