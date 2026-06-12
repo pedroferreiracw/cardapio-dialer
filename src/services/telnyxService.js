@@ -43,12 +43,34 @@ async function initiateCall(leadQueueId, leadPhone, sdrId, leadName) {
   }
 }
 
+// Busca o sip_username da credencial WebRTC do SDR
+async function getSdrSipUsername(sdrId) {
+  const credName = `sdr${sdrId}`;
+  const listResponse = await telnyxAPI.get('/telephony_credentials', {
+    params: { 'filter[tag]': credName }
+  });
+
+  if (!listResponse.data.data || listResponse.data.data.length === 0) {
+    throw new Error(`Credencial WebRTC não encontrada para ${credName}`);
+  }
+
+  const sipUsername = listResponse.data.data[0].sip_username;
+  if (!sipUsername) {
+    throw new Error(`sip_username vazio para ${credName}`);
+  }
+  return sipUsername;
+}
+
+// Transfere chamada para o browser do SDR via SIP WebRTC
 async function transferCallToSdr(callControlId, sdrId) {
+  const sipUsername = await getSdrSipUsername(sdrId);
+  const destination = `sip:${sipUsername}@sip.telnyx.com`;
+
   await telnyxAPI.post(`/calls/${callControlId}/actions/transfer`, {
-    to: `sip:sdr${sdrId}@cardapio-dialer.sip.telnyx.com`,
+    to: destination,
     from: TELNYX_PHONE_NUMBER
   });
-  console.log(`[TELNYX] Chamada transferida para sdr${sdrId}`);
+  console.log(`[TELNYX] Chamada transferida para ${destination} (SDR ${sdrId})`);
 }
 
 async function hangupCall(callControlId) {
@@ -84,16 +106,11 @@ async function getSdrToken(sdrId) {
       `/telephony_credentials/${credId}/token`, {}
     );
 
-    // Log para ver a estrutura exata do response
-    console.log('[TELNYX] Token response:', JSON.stringify(tokenResponse.data));
-
-    // Tenta os dois caminhos possíveis
     const token = typeof tokenResponse.data === 'string'
-  ? tokenResponse.data
-  : (tokenResponse.data.token || tokenResponse.data.data?.token);
+      ? tokenResponse.data
+      : (tokenResponse.data.token || tokenResponse.data.data?.token);
 
     if (!token) {
-      console.error('[TELNYX] Token não encontrado na resposta:', JSON.stringify(tokenResponse.data));
       throw new Error('Token não encontrado na resposta da Telnyx');
     }
 
