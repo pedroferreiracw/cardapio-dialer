@@ -70,7 +70,7 @@ async function transferCallToSdr(callControlId, sdrId) {
     to: destination,
     from: TELNYX_PHONE_NUMBER
   });
-  console.log(`[TELNYX] Chamada transferida para ${destination} (SDR ${sdrId})`);
+  console.log(`[TELNYX] Chamada transferida para SDR ${sdrId}`);
 }
 
 async function hangupCall(callControlId) {
