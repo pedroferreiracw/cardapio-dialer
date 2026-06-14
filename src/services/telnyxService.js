@@ -24,10 +24,15 @@ async function initiateCall(leadQueueId, leadPhone, sdrId, leadName) {
       webhook_url_method: 'POST',
       answering_machine_detection: 'premium',
       answering_machine_detection_config: {
-        total_analysis_time_millis: 10000,
-        after_silence_millis: 800,
-        between_words_silence_millis: 50,
-        maximum_number_of_words: 5,
+        total_analysis_time_millis: 2000,
+        initial_silence_millis: 1500,
+        after_greeting_silence_millis: 800,
+        greeting_duration_millis: 1500,
+        greeting_silence_duration_millis: 1500,
+        greeting_total_analysis_time_millis: 2000,
+        between_words_silence_millis: 400,
+        maximum_number_of_words: 3,
+        maximum_word_length_millis: 2000,
         silence_threshold: 256
       },
       timeout_secs: 40
