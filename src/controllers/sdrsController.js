@@ -15,7 +15,26 @@ async function updateSdrStatus(req, res) {
 
   try {
     const redis = await getRedisClient();
-    const resolvedName = sdr_name || sdr_id;
+
+    // Resolve o nome com prioridade: nome enviado > nome já salvo na tabela > nome no Redis > ID
+    // NUNCA sobrescreve um nome bom existente com o ID.
+    let resolvedName = sdr_name && sdr_name !== sdr_id ? sdr_name : null;
+
+    if (!resolvedName) {
+      const existing = await pool.query('SELECT name FROM sdrs WHERE id = $1', [sdr_id]);
+      if (existing.rows[0]?.name && existing.rows[0].name !== sdr_id) {
+        resolvedName = existing.rows[0].name;
+      }
+    }
+    if (!resolvedName) {
+      const redisName = await redis.get(`sdr:${sdr_id}:name`);
+      if (redisName && redisName !== sdr_id) {
+        resolvedName = redisName;
+      }
+    }
+    if (!resolvedName) {
+      resolvedName = sdr_id; // último recurso
+    }
 
     // Salva o status no Redis com expiração de 12h
     await redis.setEx(`sdr:${sdr_id}:status`, 43200, status);
@@ -24,7 +43,6 @@ async function updateSdrStatus(req, res) {
 
     // Rastreia sessões para tempo ativo/inativo
     if (status === 'ONLINE') {
-      // Inicia nova sessão
       await pool.query(`
         INSERT INTO sdr_sessions (sdr_id, sdr_name, started_at)
         VALUES ($1, $2, NOW())
@@ -33,27 +51,28 @@ async function updateSdrStatus(req, res) {
       console.log(`SDR ${sdr_id} → ONLINE — sessão iniciada`);
 
     } else if (status === 'OFFLINE') {
-      // Encerra sessão ativa
-    await pool.query(`
-      UPDATE sdr_sessions
-      SET ended_at = NOW(),
-          duration_seconds = EXTRACT(EPOCH FROM (NOW() - started_at))::INT
-      WHERE id = (
-        SELECT id FROM sdr_sessions
-        WHERE sdr_id = $1
-          AND ended_at IS NULL
-        ORDER BY started_at DESC
-        LIMIT 1
-      )
-    `, [sdr_id]);
+      await pool.query(`
+        UPDATE sdr_sessions
+        SET ended_at = NOW(),
+            duration_seconds = EXTRACT(EPOCH FROM (NOW() - started_at))::INT
+        WHERE id = (
+          SELECT id FROM sdr_sessions
+          WHERE sdr_id = $1
+            AND ended_at IS NULL
+          ORDER BY started_at DESC
+          LIMIT 1
+        )
+      `, [sdr_id]);
 
       console.log(`SDR ${sdr_id} → OFFLINE — sessão encerrada`);
     }
 
-    // Garante que o nome está salvo na tabela sdrs
+    // Grava o nome na tabela sdrs SEM sobrescrever um nome bom com o ID.
+    // COALESCE + NULLIF: se resolvedName for o ID, mantém o nome que já existe.
     await pool.query(`
       INSERT INTO sdrs (id, name) VALUES ($1, $2)
-      ON CONFLICT (id) DO UPDATE SET name = $2
+      ON CONFLICT (id) DO UPDATE
+      SET name = COALESCE(NULLIF($2, $1), sdrs.name)
     `, [sdr_id, resolvedName]);
 
     console.log(`SDR ${sdr_id} → ${status}`);
@@ -85,12 +104,11 @@ async function getSdrStatus(req, res) {
     const status     = await redis.get(`sdr:${sdr_id}:status`) || 'OFFLINE';
     const updated_at = await redis.get(`sdr:${sdr_id}:updated_at`);
 
-    // Busca nome da tabela sdrs (fonte mais confiável)
     const sdrResult = await pool.query(
       'SELECT name FROM sdrs WHERE id = $1', [sdr_id]
     );
-    const name = sdrResult.rows[0]?.name 
-      || await redis.get(`sdr:${sdr_id}:name`) 
+    const name = sdrResult.rows[0]?.name
+      || await redis.get(`sdr:${sdr_id}:name`)
       || sdr_id;
 
     return res.json({ sdr_id, name, status, updated_at });
@@ -112,7 +130,6 @@ async function getAllSdrsStatus(req, res) {
       const status     = await redis.get(key);
       const updated_at = await redis.get(`sdr:${sdr_id}:updated_at`);
 
-      // Busca nome da tabela sdrs primeiro
       const sdrResult = await pool.query(
         'SELECT name FROM sdrs WHERE id = $1', [sdr_id]
       );
@@ -155,7 +172,6 @@ async function getSdrSessionStats(req, res) {
       ORDER BY total_ativo_segundos DESC NULLS LAST
     `, [start, end]);
 
-    // Formata os segundos em horas e minutos
     const formatted = result.rows.map(row => ({
       sdr_id: row.sdr_id,
       sdr_name: row.sdr_name,
@@ -183,9 +199,9 @@ function formatDuration(seconds) {
   return `${m}min`;
 }
 
-module.exports = { 
-  updateSdrStatus, 
-  getSdrStatus, 
+module.exports = {
+  updateSdrStatus,
+  getSdrStatus,
   getAllSdrsStatus,
   getSdrSessionStats
 };
