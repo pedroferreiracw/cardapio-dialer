@@ -20,13 +20,13 @@ router.get('/sdr/:sdr_id', async (req, res) => {
         AND attempted_at < ($3::date + INTERVAL '1 day')
     `, [sdr_id, start, end]);
 
-const atendidos = await pool.query(`
-      SELECT COUNT(DISTINCT lead_id) as total
-      FROM call_outcomes
+    const atendidos = await pool.query(`
+      SELECT COUNT(*) as total
+      FROM leads_queue
       WHERE sdr_id = $1
-        AND created_at >= $2::date
-        AND created_at < ($3::date + INTERVAL '1 day')
-        AND outcome != 'PENDING'
+        AND answered_at IS NOT NULL
+        AND answered_at >= $2::date
+        AND answered_at < ($3::date + INTERVAL '1 day')
     `, [sdr_id, start, end]);
 
     const reunioes = await pool.query(`
@@ -108,13 +108,13 @@ router.get('/general', async (req, res) => {
           AND attempted_at < ($3::date + INTERVAL '1 day')
       `, [sdr_id, start, end]);
 
-const atendidos = await pool.query(`
-        SELECT COUNT(DISTINCT lead_id) as total
-        FROM call_outcomes
+      const atendidos = await pool.query(`
+        SELECT COUNT(*) as total
+        FROM leads_queue
         WHERE sdr_id = $1
-            AND created_at >= $2::date
-            AND created_at < ($3::date + INTERVAL '1 day')
-            AND outcome != 'PENDING'
+          AND answered_at IS NOT NULL
+          AND answered_at >= $2::date
+          AND answered_at < ($3::date + INTERVAL '1 day')
         `, [sdr_id, start, end]);
 
       const reunioes = await pool.query(`
