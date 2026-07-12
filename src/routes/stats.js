@@ -181,6 +181,7 @@ router.get('/general', async (req, res) => {
 // Fila real do SDR
 router.get('/queue/:sdr_id', async (req, res) => {
   const { sdr_id } = req.params;
+  const limit = Math.min(parseInt(req.query.limit) || 200, 500); // padrão 200, teto 500
 
   try {
     const result = await pool.query(`
@@ -194,8 +195,8 @@ router.get('/queue/:sdr_id', async (req, res) => {
       ORDER BY 
         CASE WHEN last_attempt_at IS NULL THEN 0 ELSE 1 END,
         last_attempt_at ASC
-      LIMIT 20
-    `, [sdr_id]);
+      LIMIT $2
+    `, [sdr_id, limit]);
 
     return res.json(result.rows);
   } catch (err) {
