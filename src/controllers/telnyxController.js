@@ -12,13 +12,34 @@ async function getLeadData(leadQueueId) {
   return result.rows[0] || null;
 }
 
+// Marca uma tentativa como abandonada (perdeu a corrida do lock no power dialer)
+async function registrarAbandono(leadQueueId, callControlId) {
+  try {
+    await pool.query(`
+      UPDATE call_attempts
+      SET abandoned = TRUE
+      WHERE telnyx_call_control_id = $1
+    `, [callControlId]);
+
+    // Devolve o lead pra fila — ele não falou com ninguém, só foi descartado
+    await pool.query(`
+      UPDATE leads_queue
+      SET status = 'PENDING', updated_at = NOW()
+      WHERE id = $1 AND status = 'CALLING'
+    `, [leadQueueId]);
+
+    console.log(`[PD] Abandono registrado — lead ${leadQueueId} devolvido à fila`);
+  } catch (err) {
+    console.error('[PD] Erro ao registrar abandono:', err.message);
+  }
+}
+
 async function handleTransfer(leadQueueId, sdrId, callControlId, source, io) {
   const redis = await getRedisClient();
-  const sdrStatus = await redis.get(`sdr:${sdrId}:status`);
 
-  console.log(`[${source}] Transferindo lead ${leadQueueId} → SDR ${sdrId} (status=${sdrStatus})`);
+  console.log(`[${source}] Tentando transferir lead ${leadQueueId} → SDR ${sdrId}`);
 
-  // Verifica se já foi transferido
+  // Verifica se já foi transferido (proteção rápida, não-atômica)
   const alreadyAnswered = await pool.query(
     `SELECT id FROM leads_queue WHERE id = $1 AND status = 'ANSWERED'`,
     [leadQueueId]
@@ -28,41 +49,63 @@ async function handleTransfer(leadQueueId, sdrId, callControlId, source, io) {
     return;
   }
 
-  if (sdrStatus === 'ONLINE') {
-    await redis.setEx(`sdr:${sdrId}:status`, 43200, 'BUSY');
-    await redis.setEx(`sdr:${sdrId}:current_call`, 43200, JSON.stringify({
-      leadQueueId,
-      callControlId,
-      startedAt: new Date().toISOString()
-    }));
+  // ── LOCK ATÔMICO — o coração do power dialer ──────────────────────
+  // Tenta reservar o SDR. Só UMA chamada vence a corrida; as demais são abandonadas.
+  // NX = só cria se não existir. EX = auto-libera em 300s (trava contra lock preso).
+  const reservou = await redis.set(
+    `sdr:${sdrId}:lock`,
+    callControlId,
+    { NX: true, EX: 300 }
+  );
 
-    await pool.query(`
-      UPDATE leads_queue
-      SET status = 'ANSWERED', answered_at = NOW(), updated_at = NOW()
-      WHERE id = $1
-    `, [leadQueueId]);
-
-    const leadData = await getLeadData(leadQueueId);
-    if (leadData && io) {
-      io.to(`sdr_${sdrId}`).emit('incoming_call', {
-        lead_id: leadData.lead_id,
-        lead_name: leadData.lead_name,
-        lead_phone: leadData.lead_phone,
-        lead_email: leadData.lead_email,
-        lead_company: leadData.lead_company,
-        cadence: leadData.cadence,
-        attempt: leadData.total_attempts,
-        call_control_id: callControlId
-      });
-      console.log(`[${source}] Dados enviados via WebSocket para sdr_${sdrId}`);
-    }
-
-    await transferCallToSdr(callControlId, sdrId);
-
-  } else {
-    console.log(`[${source}] SDR ${sdrId} offline — encerrando chamada`);
+  if (!reservou) {
+    // Perdeu a corrida — SDR já está em outra chamada. Descarta esta.
+    console.log(`[${source}] SDR ${sdrId} já ocupado (lock) — abandonando lead ${leadQueueId}`);
     await hangupCall(callControlId);
+    await registrarAbandono(leadQueueId, callControlId);
+    return;
   }
+
+  // ── Venceu a corrida — confirma que o SDR está online antes de transferir ──
+  const sdrStatus = await redis.get(`sdr:${sdrId}:status`);
+  if (sdrStatus !== 'ONLINE') {
+    console.log(`[${source}] SDR ${sdrId} não está ONLINE (${sdrStatus}) — liberando lock e encerrando`);
+    await redis.del(`sdr:${sdrId}:lock`);
+    await hangupCall(callControlId);
+    return;
+  }
+
+  // A partir daqui a transferência está garantida para este lead
+  await redis.setEx(`sdr:${sdrId}:status`, 43200, 'BUSY');
+  await redis.setEx(`sdr:${sdrId}:current_call`, 43200, JSON.stringify({
+    leadQueueId,
+    callControlId,
+    startedAt: new Date().toISOString()
+  }));
+
+  await pool.query(`
+    UPDATE leads_queue
+    SET status = 'ANSWERED', answered_at = NOW(), updated_at = NOW()
+    WHERE id = $1
+  `, [leadQueueId]);
+
+  const leadData = await getLeadData(leadQueueId);
+  if (leadData && io) {
+    io.to(`sdr_${sdrId}`).emit('incoming_call', {
+      lead_id: leadData.lead_id,
+      lead_name: leadData.lead_name,
+      lead_phone: leadData.lead_phone,
+      lead_email: leadData.lead_email,
+      lead_company: leadData.lead_company,
+      cadence: leadData.cadence,
+      attempt: leadData.total_attempts,
+      call_control_id: callControlId
+    });
+    console.log(`[${source}] Dados enviados via WebSocket para sdr_${sdrId}`);
+  }
+
+  await transferCallToSdr(callControlId, sdrId);
+  console.log(`[${source}] Lead ${leadQueueId} transferido para SDR ${sdrId}`);
 }
 
 // TeXML inicial — mantém chamada em espera enquanto AMD processa
@@ -188,6 +231,8 @@ async function statusCallback(req, res) {
           await redis.setEx(`sdr:${sdrId}:status`, 43200, 'ONLINE');
           await redis.del(`sdr:${sdrId}:current_call`);
         }
+        // Libera o lock do power dialer — SDR volta a poder receber transferências
+        await redis.del(`sdr:${sdrId}:lock`);
         break;
       }
     }
