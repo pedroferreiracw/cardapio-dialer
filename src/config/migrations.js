@@ -79,6 +79,11 @@ async function runMigrations() {
     `);
 
     await pool.query(`
+      ALTER TABLE call_attempts
+      ADD COLUMN IF NOT EXISTS abandoned BOOLEAN DEFAULT FALSE;
+    `);
+
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS daily_schedules (
         id SERIAL PRIMARY KEY,
         lead_queue_id INT REFERENCES leads_queue(id),

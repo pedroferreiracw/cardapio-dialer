@@ -2,7 +2,14 @@ const cron = require('node-cron');
 const pool = require('../config/database');
 const { getRedisClient } = require('../config/redis');
 
-async function getLeadsDueNow(onlineSdrs) {
+// ── Trava de segurança do power dialer ────────────────────────────────
+// Começa em 1 (= comporta-se como simple dialer). Só suba para 2/3 após
+// validar o teste de 2 SDRs simultâneos (áudio não cruza).
+const MAX_LINHAS_POR_SDR = parseInt(process.env.MAX_LINHAS_POR_SDR || '1', 10);
+
+// Busca N leads DAQUELE SDR específico, prontos para discar agora.
+// O particionamento por sdr_id garante que um SDR só disca os próprios leads.
+async function getLeadsParaSdr(sdrId, limite) {
   const configResult = await pool.query(
     'SELECT interval_minutes FROM cadence_config WHERE id = 1'
   );
@@ -11,21 +18,20 @@ async function getLeadsDueNow(onlineSdrs) {
   const result = await pool.query(`
     SELECT lq.*
     FROM leads_queue lq
-    WHERE lq.sdr_id = ANY($1::varchar[])
-      AND lq.status IN ('PENDING', 'CALLING')
-      AND lq.status NOT IN ('WON', 'LOST', 'ARCHIVED', 'ANSWERED', 'SCHEDULED', 'WRONG_NUMBER')
+    WHERE lq.sdr_id = $1
+      AND lq.status = 'PENDING'
+      AND lq.status NOT IN ('WON', 'LOST', 'ARCHIVED', 'ANSWERED', 'CALLING', 'SCHEDULED', 'WRONG_NUMBER')
       AND (
         lq.last_attempt_at IS NULL
         OR lq.last_attempt_at <= NOW() - ($2 || ' minutes')::INTERVAL
       )
       AND lq.total_attempts < lq.max_attempts
     ORDER BY
-       lq.created_at DESC,
-       lq.last_attempt_at ASC NULLS FIRST
-    LIMIT 10
-  `, [onlineSdrs, intervalMinutes]);
+      lq.created_at DESC,
+      lq.last_attempt_at ASC NULLS FIRST
+    LIMIT $3
+  `, [sdrId, intervalMinutes, limite]);
 
-  console.log(`[DIALER] ${result.rows.length} lead(s) para SDRs online — intervalo: ${intervalMinutes}min`);
   return result.rows;
 }
 
@@ -42,7 +48,6 @@ async function getOnlineSdrs() {
         onlineSdrs.push(sdrId);
       }
     }
-
     return onlineSdrs;
   } catch (err) {
     console.error('[DIALER] Erro ao buscar SDRs online:', err.message);
@@ -50,28 +55,8 @@ async function getOnlineSdrs() {
   }
 }
 
-async function isSdrOnline(sdrId) {
-  try {
-    const redis = await getRedisClient();
-    const status = await redis.get(`sdr:${sdrId}:status`);
-    return status === 'ONLINE';
-  } catch (err) {
-    console.error(`[SDR CHECK] Erro ao verificar SDR ${sdrId}:`, err.message);
-    return false;
-  }
-}
-
+// Dispara UMA ligação para um lead. Marca CALLING e registra a tentativa.
 async function processLead(lead) {
-  const sdrOnline = await isSdrOnline(lead.sdr_id);
-  if (!sdrOnline) return;
-
-  const redis = await getRedisClient();
-  const sdrStatus = await redis.get(`sdr:${lead.sdr_id}:status`);
-  if (sdrStatus === 'BUSY') {
-    console.log(`[DIALER] SDR ${lead.sdr_name} ocupado — aguardando`);
-    return;
-  }
-
   console.log(`[DIALER] Discando para ${lead.lead_name} (${lead.lead_phone}) → SDR: ${lead.sdr_name}`);
 
   try {
@@ -79,7 +64,7 @@ async function processLead(lead) {
     const callControlId = await initiateCall(
       lead.id,
       lead.lead_phone,
-      lead.sdr_id,
+      lead.sdr_id,   // ← dono do lead: amarra a transferência ao SDR certo
       lead.lead_name
     );
 
@@ -110,10 +95,39 @@ async function processLead(lead) {
   }
 }
 
-async function startDialerJob() {
-  console.log('Scheduler iniciado — verificando leads a cada 1 minuto');
+// Processa um SDR: se ele estiver livre (sem lock), dispara até N linhas em paralelo.
+async function processarSdr(sdrId) {
+  const redis = await getRedisClient();
 
-  // Libera leads travados em ANSWERED ou CALLING há mais de 1 hora
+  // Se o SDR já tem um lock ativo, ele está em/entrando numa chamada. Não disca mais.
+  const emChamada = await redis.get(`sdr:${sdrId}:lock`);
+  if (emChamada) {
+    return;
+  }
+
+  // Confirma que está ONLINE (não BUSY nem offline)
+  const status = await redis.get(`sdr:${sdrId}:status`);
+  if (status !== 'ONLINE') {
+    return;
+  }
+
+  // Quantas linhas disparar nesta leva
+  const linhas = MAX_LINHAS_POR_SDR;
+  const leads = await getLeadsParaSdr(sdrId, linhas);
+  if (leads.length === 0) return;
+
+  console.log(`[PD] SDR ${sdrId}: disparando ${leads.length} linha(s) em paralelo`);
+
+  // Dispara todas as linhas do SDR ao mesmo tempo.
+  // Quem atender primeiro vence o lock (no telnyxController) e fica com o SDR;
+  // os demais são abandonados e devolvidos à fila. Nunca vão para outro SDR.
+  await Promise.all(leads.map(lead => processLead(lead)));
+}
+
+async function startDialerJob() {
+  console.log(`Power dialer iniciado — loop de 5s | MAX_LINHAS_POR_SDR=${MAX_LINHAS_POR_SDR}`);
+
+  // Destrava leads presos em ANSWERED/CALLING há mais de 1h (mantido do original)
   cron.schedule('*/15 * * * *', async () => {
     try {
       const result = await pool.query(`
@@ -130,33 +144,23 @@ async function startDialerJob() {
     }
   });
 
-  // Job principal — roda a cada 1 minuto
-  cron.schedule('* * * * *', async () => {
+  // ── Loop principal do power dialer — a cada 5 segundos ──────────────
+  let rodando = false; // trava de reentrância: evita sobreposição de execuções
+  setInterval(async () => {
+    if (rodando) return;
+    rodando = true;
     try {
       const onlineSdrs = await getOnlineSdrs();
       if (onlineSdrs.length === 0) return;
 
-      console.log(`[DIALER] ${onlineSdrs.length} SDR(s) online: ${onlineSdrs.join(', ')}`);
-
-      const leads = await getLeadsDueNow(onlineSdrs);
-      if (leads.length === 0) return;
-
-      const leadsBySdr = {};
-      for (const lead of leads) {
-        if (!leadsBySdr[lead.sdr_id]) {
-          leadsBySdr[lead.sdr_id] = lead;
-        }
-      }
-
-      console.log(`[DIALER] Processando 1 lead por SDR — ${Object.keys(leadsBySdr).length} SDR(s) com leads`);
-
-      for (const lead of Object.values(leadsBySdr)) {
-        await processLead(lead);
-      }
+      // Processa cada SDR de forma independente — cada um só disca seus próprios leads
+      await Promise.all(onlineSdrs.map(sdrId => processarSdr(sdrId)));
     } catch (err) {
-      console.error('[DIALER] Erro no scheduler:', err.message);
+      console.error('[PD] Erro no loop:', err.message);
+    } finally {
+      rodando = false;
     }
-  });
+  }, 5000);
 }
 
 module.exports = { startDialerJob };
