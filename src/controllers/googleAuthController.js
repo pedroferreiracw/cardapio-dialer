@@ -1,9 +1,7 @@
 const { OAuth2Client } = require('google-auth-library');
-const axios = require('axios');
+const { findMeetimeUserByEmail } = require('../services/meetimeUsers');
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-const MEETIME_API_URL = 'https://api.meetime.com.br/v2';
-const MEETIME_TOKEN = process.env.MEETIME_API_KEY;
 
 const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
@@ -29,18 +27,19 @@ async function verifyGoogleToken(req, res) {
     console.log(`[AUTH] Login Google: ${email}`);
 
     // Busca o usuário na Meetime pelo e-mail
-    const response = await axios.get(`${MEETIME_API_URL}/users`, {
-      headers: { Authorization: MEETIME_TOKEN }
-    });
+    const { user: meetimeUser, reason } = await findMeetimeUserByEmail(email);
 
-    const users = response.data.data || [];
-    const meetimeUser = users.find(
-      u => u.email?.toLowerCase() === email.toLowerCase() && u.active
-    );
-
-    if (!meetimeUser) {
+    if (reason === 'not_found') {
+      console.warn('[AUTH] Login Google negado: e-mail não encontrado na Meetime');
       return res.status(403).json({
-        error: 'Usuário não encontrado na Meetime. Verifique se seu e-mail está cadastrado e ativo.'
+        error: 'E-mail não encontrado na Meetime. Verifique se seu e-mail está cadastrado.'
+      });
+    }
+
+    if (reason === 'inactive') {
+      console.warn(`[AUTH] Login Google negado: usuário inativo na Meetime (meetime_id ${meetimeUser.id})`);
+      return res.status(403).json({
+        error: 'Usuário inativo na Meetime. Peça ao gestor para reativar seu acesso.'
       });
     }
 

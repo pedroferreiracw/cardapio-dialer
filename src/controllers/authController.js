@@ -1,7 +1,4 @@
-const axios = require('axios');
-
-const MEETIME_API_URL = 'https://api.meetime.com.br/v2';
-const MEETIME_TOKEN = process.env.MEETIME_API_KEY;
+const { findMeetimeUserByEmail } = require('../services/meetimeUsers');
 
 async function getUserByEmail(req, res) {
   const { email } = req.query;
@@ -11,19 +8,19 @@ async function getUserByEmail(req, res) {
   }
 
   try {
-    const response = await axios.get(`${MEETIME_API_URL}/users`, {
-      headers: { Authorization: MEETIME_TOKEN }
-    });
+    const { user, reason } = await findMeetimeUserByEmail(email);
 
-    const users = response.data.data || [];
+    if (reason === 'not_found') {
+      console.warn('[AUTH] Login Meetime negado: e-mail não encontrado na Meetime');
+      return res.status(404).json({
+        error: 'E-mail não encontrado na Meetime'
+      });
+    }
 
-    const user = users.find(
-      u => u.email?.toLowerCase() === email.toLowerCase() && u.active
-    );
-
-    if (!user) {
-      return res.status(404).json({ 
-        error: 'Usuário não encontrado na Meetime ou inativo' 
+    if (reason === 'inactive') {
+      console.warn(`[AUTH] Login Meetime negado: usuário inativo na Meetime (meetime_id ${user.id})`);
+      return res.status(404).json({
+        error: 'Usuário inativo na Meetime'
       });
     }
 
